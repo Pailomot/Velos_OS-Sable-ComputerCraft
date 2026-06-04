@@ -21,12 +21,29 @@ local function quatToEuler(q)
   return 0, 0, 0
 end
 
-local CARDINALS = {"N","NNE","NE","ENE","E","ESE","SE","SSE",
-                   "S","SSO","SO","OSO","O","ONO","NO","NNO"}
-local function yawToCardinal(yaw)
+-- Tabla de cardinales: abreviado y completo
+-- Se elige segun el espacio disponible en la linea
+local CARDINALS_SHORT = {
+  "N","NNE","NE","ENE","E","ESE","SE","SSE",
+  "S","SSO","SO","OSO","O","ONO","NO","NNO"
+}
+local CARDINALS_LONG = {
+  "Norte","Norte-Noreste","Noreste","Este-Noreste",
+  "Este","Este-Sureste","Sureste","Sur-Sureste",
+  "Sur","Sur-Suroeste","Suroeste","Oeste-Suroeste",
+  "Oeste","Oeste-Noroeste","Noroeste","Nor-Noroeste"
+}
+
+local function yawToCardinal(yaw, lineWidth)
   yaw = yaw % 360
   if yaw < 0 then yaw = yaw + 360 end
-  return CARDINALS[math.floor((yaw + 11.25) / 22.5) % 16 + 1]
+  local idx = math.floor((yaw + 11.25) / 22.5) % 16 + 1
+  -- Si la linea tiene espacio suficiente, nombre completo
+  -- "Nor-Noroeste" es el mas largo (12 chars) + prefijo " Rumbo: " (8) = 20
+  if lineWidth and lineWidth >= 22 then
+    return CARDINALS_LONG[idx]
+  end
+  return CARDINALS_SHORT[idx]
 end
 
 local function horizonBar(pitch, roll, width)
@@ -36,6 +53,27 @@ local function horizonBar(pitch, roll, width)
   local bar = string.rep("-", width)
   bar = bar:sub(1, pos-1) .. "|" .. bar:sub(pos+1)
   return string.format("%+.0f", pitch) .. " [" .. bar .. "]"
+end
+
+-- ============================================================
+--  Escritura sin parpadeo
+--  Rellena con espacios hasta 'w' para borrar residuos
+--  sin hacer clear() en la pantalla completa
+-- ============================================================
+local function writeLine(t, x, y, text, w, fg, bg)
+  -- Rellenar o truncar hasta exactamente w - x + 1 caracteres
+  local available = w - x + 1
+  if #text > available then
+    text = string.sub(text, 1, available - 1) .. ">"
+  else
+    text = text .. string.rep(" ", available - #text)
+  end
+  if fg then t.term.setTextColor(fg) end
+  if bg then t.term.setBackgroundColor(bg) end
+  t.term.setCursorPos(x, y)
+  t.term.write(text)
+  -- Resetear bg para no contaminar lineas siguientes
+  t.term.setBackgroundColor(colors.black)
 end
 
 -- ============================================================
@@ -64,15 +102,14 @@ local function drawHeader(t, profile)
   local title = " VELOS OS  [" .. (profile or "?"):upper() .. "]"
   local right = now .. " "
   local mid   = string.rep(" ", t.w - #title - #right)
-  renderer.write(t, 1, 1, title..mid..right,
+  writeLine(t, 1, 1, title..mid..right, t.w,
     t.color and colors.black  or nil,
     t.color and colors.yellow or nil)
 end
 
 local function drawFooter(t)
   local hint = " [Q]Salir  [P]Perfil  [T]Tanks"
-  renderer.write(t, 1, t.h,
-    renderer.truncate(hint .. string.rep(" ", t.w), t.w),
+  writeLine(t, 1, t.h, hint, t.w,
     t.color and colors.black or nil,
     t.color and colors.gray  or nil)
 end
@@ -81,13 +118,15 @@ local function drawNotifs(t)
   pruneNotifs()
   local startY = t.h - #_notifs - 1
   for i, n in ipairs(_notifs) do
-    renderer.write(t, 1, startY + i - 1,
-      renderer.truncate(" " .. n.text .. string.rep(" ", t.w), t.w),
+    writeLine(t, 1, startY + i - 1, " " .. n.text, t.w,
       t.color and n.color     or nil,
       t.color and colors.gray or nil)
   end
 end
 
+-- ============================================================
+--  Bloque de datos de Sable (sin clear, sobreescribe)
+-- ============================================================
 local function drawSableBlock(t, x, y, w, profile)
   local pose = sublevel.getLogicalPose()
   local vel  = sublevel.getVelocity()
@@ -110,65 +149,77 @@ local function drawSableBlock(t, x, y, w, profile)
 
   local line = y
 
-  renderer.write(t, x, line, renderer.truncate("-- VELOCIDAD --", w), col)
-  line = line + 1
-  renderer.write(t, x, line, renderer.truncate(string.format(" Total:  %6.2f m/s", spd_total), w), norm)
-  line = line + 1
-  renderer.write(t, x, line, renderer.truncate(string.format(" Horiz:  %6.2f m/s", spd_horiz), w), dim)
-  line = line + 1
-  renderer.write(t, x, line, renderer.truncate(string.format(" Vert:   %+6.2f m/s", spd_vert), w), dim)
-  line = line + 1
+  writeLine(t, x, line, "-- VELOCIDAD --",                                    w, col)  line=line+1
+  writeLine(t, x, line, string.format(" Total:  %6.2f m/s", spd_total),       w, norm) line=line+1
+  writeLine(t, x, line, string.format(" Horiz:  %6.2f m/s", spd_horiz),       w, dim)  line=line+1
+  writeLine(t, x, line, string.format(" Vert:   %+6.2f m/s", spd_vert),       w, dim)  line=line+1
 
   if profile ~= "terrestre" then
-    line = line + 1
-    renderer.write(t, x, line, renderer.truncate("-- ORIENTACION --", w), col)
-    line = line + 1
-    renderer.write(t, x, line, renderer.truncate(horizonBar(pitch, roll, w - 6), w), norm)
-    line = line + 1
-    renderer.write(t, x, line, renderer.truncate(string.format(" Yaw:  %5.1f  %s", yaw, yawToCardinal(yaw)), w), dim)
-    line = line + 1
-    renderer.write(t, x, line, renderer.truncate(string.format(" Pitch:%+5.1f  Roll:%+5.1f", pitch, roll), w), dim)
-    line = line + 1
+    line=line+1
+    writeLine(t, x, line, "-- ORIENTACION --",                                w, col)  line=line+1
+    writeLine(t, x, line, horizonBar(pitch, roll, w - 6),                     w, norm) line=line+1
+    -- Rumbo: nombre largo si hay espacio, corto si no
+    local cardinal = yawToCardinal(yaw, w)
+    writeLine(t, x, line, string.format(" Rumbo: %5.1f  %s", yaw, cardinal),  w, dim)  line=line+1
+    writeLine(t, x, line, string.format(" Pitch: %+5.1f  Roll: %+5.1f", pitch, roll), w, dim) line=line+1
   end
 
-  line = line + 1
-  renderer.write(t, x, line, renderer.truncate("-- POSICION --", w), col)
-  line = line + 1
-  renderer.write(t, x, line, renderer.truncate(string.format(" X:%-8.1f  Y:%-8.1f", px, py), w), norm)
-  line = line + 1
-  renderer.write(t, x, line, renderer.truncate(string.format(" Z:%-8.1f", pz), w), norm)
-  line = line + 1
+  line=line+1
+  writeLine(t, x, line, "-- POSICION --",                                     w, col)  line=line+1
+  writeLine(t, x, line, string.format(" X: %-9.1f  Y: %-9.1f", px, py),      w, norm) line=line+1
+  writeLine(t, x, line, string.format(" Z: %-9.1f", pz),                      w, norm) line=line+1
 
-  line = line + 1
-  renderer.write(t, x, line, renderer.truncate("-- ATMOSFERA --", w), col)
-  line = line + 1
-  renderer.write(t, x, line, renderer.truncate(string.format(" Presion: %.1f kPa", pressure), w), dim)
-  line = line + 1
-  renderer.write(t, x, line, renderer.truncate(string.format(" Grav:%.2f  Drag:%.3f", math.abs(gravity.y), drag), w), dim)
-  line = line + 1
+  line=line+1
+  writeLine(t, x, line, "-- ATMOSFERA --",                                    w, col)  line=line+1
+  writeLine(t, x, line, string.format(" Presion: %.1f kPa", pressure),        w, dim)  line=line+1
+  writeLine(t, x, line, string.format(" Grav: %.2f  Drag: %.3f", math.abs(gravity.y), drag), w, dim) line=line+1
 
   return line - y
 end
 
+-- ============================================================
+--  Divisor vertical (sobreescribe sin clear)
+-- ============================================================
+local function drawDivider(t, col_x, fromY, toY)
+  local fg = t.color and colors.gray or nil
+  for row = fromY, toY do
+    if fg then t.term.setTextColor(fg) end
+    t.term.setCursorPos(col_x, row)
+    t.term.write("|")
+  end
+end
+
+-- ============================================================
+--  Display Links secundarios
+-- ============================================================
 local function renderDisplayLinks(profile)
   for _, dl in ipairs(renderer.getExtras()) do
     local dt = dl.term
-    dt.clear()
-    dt.setCursorPos(1,1)
+    local w  = dl.w
+
+    -- Sobreescribir linea a linea sin clear
+    local function dlLine(y, text)
+      local available = w
+      if #text > available then text = text:sub(1, available-1) .. ">" end
+      text = text .. string.rep(" ", available - #text)
+      dt.setCursorPos(1, y)
+      dt.write(text)
+    end
+
     local vel  = sublevel.getVelocity()
     local pose = sublevel.getLogicalPose()
-    dt.write("VELOS OS | " .. profile:upper())
-    dt.setCursorPos(1,2)
-    dt.write(string.format("Vel: %.1f m/s", speed(vel)))
-    dt.setCursorPos(1,3)
-    dt.write(string.format("Alt: %.1f m", pose.position.y))
-    dt.setCursorPos(1,4)
-    dt.write(string.format("X:%.0f Z:%.0f", pose.position.x, pose.position.z))
+
+    dlLine(1, "VELOS OS | " .. profile:upper())
+    dlLine(2, string.format("Vel: %.1f m/s", speed(vel)))
+    dlLine(3, string.format("Alt: %.1f m",   pose.position.y))
+    dlLine(4, string.format("X:%.0f  Z:%.0f", pose.position.x, pose.position.z))
+
     if detector.hasType("tank") then
       local fuel, cap = tanks.getTotalFuel()
       local pct = cap > 0 and (fuel/cap*100) or 0
-      dt.setCursorPos(1,5)
-      dt.write(string.format("Comb: %.0f%% (%d mB)", pct, fuel))
+      dlLine(5, string.format("Comb: %.0f%% (%d mB)", pct, fuel))
+    else
+      dlLine(5, "")
     end
   end
 end
@@ -182,22 +233,23 @@ function hud.run(renderTarget)
 
   tanks.init()
 
+  -- Limpiar UNA sola vez al arrancar
+  t.term.setBackgroundColor(colors.black)
+  t.term.setTextColor(colors.white)
+  t.term.clear()
+  t.term.setCursorBlink(false)
+
   local timerId = os.startTimer(REFRESH_HZ)
   local running = true
 
   local function draw()
     if not sublevel.isInPlotGrid() then
-      t.term.setBackgroundColor(colors.black)
-      t.term.clear()
-      renderer.write(t, 1, 1, "Sub-Level perdido!", t.color and colors.red or nil)
-      renderer.write(t, 1, 2, "Reintentando...",   t.color and colors.yellow or nil)
+      writeLine(t, 1, 1, "Sub-Level perdido!  ", t.w, t.color and colors.red    or nil)
+      writeLine(t, 1, 2, "Reintentando...     ", t.w, t.color and colors.yellow or nil)
       return
     end
 
-    t.term.setBackgroundColor(colors.black)
-    t.term.clear()
-    t.term.setCursorBlink(false)
-
+    -- Header y footer siempre se sobreescriben
     drawHeader(t, profile)
     drawFooter(t)
 
@@ -208,16 +260,14 @@ function hud.run(renderTarget)
       local leftW  = math.floor(t.w * 0.55)
       local rightW = t.w - leftW - 1
       drawSableBlock(t, 1, contentY, leftW, profile)
-      for row = contentY, contentY + contentH - 1 do
-        renderer.write(t, leftW+1, row, "|", t.color and colors.gray or nil)
-      end
+      drawDivider(t, leftW+1, contentY, contentY + contentH - 1)
       tanks.renderAll(t, leftW+2, contentY, rightW, contentH)
 
     elseif t.w >= 40 then
       local topH = math.floor(contentH * 0.6)
       local used = drawSableBlock(t, 1, contentY, t.w, profile)
       local sepY = contentY + math.min(used, topH)
-      renderer.hline(t, sepY, "-", t.color and colors.gray or nil)
+      writeLine(t, 1, sepY, string.rep("-", t.w), t.w, t.color and colors.gray or nil)
       tanks.renderAll(t, 1, sepY+1, t.w, contentH - (sepY - contentY) - 1)
     else
       drawSableBlock(t, 1, contentY, t.w, profile)
@@ -240,6 +290,9 @@ function hud.run(renderTarget)
       elseif p1 == keys.p then
         config.firstTimeSetup(t)
         profile = config.get("vehicle_profile", "terrestre")
+        -- Limpiar pantalla al volver del menu de configuracion
+        t.term.setBackgroundColor(colors.black)
+        t.term.clear()
         pushNotif("Perfil: " .. profile, colors.lime)
       elseif p1 == keys.t then
         config.set("tank_types", {})
