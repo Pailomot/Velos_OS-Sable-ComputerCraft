@@ -3,11 +3,14 @@
 --  Coloca este archivo como /startup.lua en la Advanced Computer
 -- ============================================================
 
-os.loadAPI("core/renderer.lua")
-os.loadAPI("core/detector.lua")
-os.loadAPI("core/config.lua")
-os.loadAPI("modules/hud.lua")
-os.loadAPI("modules/tanks.lua")
+-- Cargar modulos del core
+_G.renderer = require("core.renderer")
+_G.detector  = require("core.detector")
+_G.config    = require("core.config")
+
+-- Cargar modulos opcionales
+_G.hud   = require("modules.hud")
+_G.tanks = require("modules.tanks")
 
 -- Splash screen rapido
 term.setBackgroundColor(colors.black)
@@ -54,7 +57,7 @@ term.setTextColor(colors.lime)
 print(" Pantalla: " .. renderTarget.name)
 term.setTextColor(colors.lightGray)
 
--- 3. Cargar configuracion guardada (perfil de vehiculo, tanks, etc)
+-- 3. Cargar configuracion guardada
 print(" Cargando configuracion...")
 config.load()
 term.setTextColor(colors.lime)

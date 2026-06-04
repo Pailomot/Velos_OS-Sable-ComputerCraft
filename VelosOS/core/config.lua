@@ -1,12 +1,12 @@
 -- ============================================================
 --  VelosOS  |  core/config.lua
---  Guarda y carga la configuracion del vehiculo en disco
 -- ============================================================
+
+local config = {}
 
 local CONFIG_PATH = "data/config.cfg"
 local _data = {}
 
--- Profiles disponibles con etiquetas de datos relevantes
 local PROFILES = {
   { id = "terrestre", label = "Terrestre",   icon = "[T]" },
   { id = "aereo",     label = "Aereo",       icon = "[A]" },
@@ -14,7 +14,7 @@ local PROFILES = {
   { id = "nautico",   label = "Nautico",     icon = "[N]" },
 }
 
-function load()
+function config.load()
   _data = {}
   if fs.exists(CONFIG_PATH) then
     local f = fs.open(CONFIG_PATH, "r")
@@ -27,8 +27,7 @@ function load()
   end
 end
 
-function save()
-  -- Asegurar que la carpeta exista
+function config.save()
   if not fs.exists("data") then fs.makeDir("data") end
   local f = fs.open(CONFIG_PATH, "w")
   if f then
@@ -37,32 +36,27 @@ function save()
   end
 end
 
-function get(key, default)
+function config.get(key, default)
   local v = _data[key]
   if v == nil then return default end
   return v
 end
 
-function set(key, value)
+function config.set(key, value)
   _data[key] = value
-  save()
+  config.save()
 end
 
--- Devuelve lista de perfiles para el menu
-function getProfiles()
+function config.getProfiles()
   return PROFILES
 end
 
--- ============================================================
---  Primer arranque: setup interactivo en la terminal
--- ============================================================
-function firstTimeSetup(renderTarget)
+function config.firstTimeSetup(renderTarget)
   local t = renderTarget.term
   t.setBackgroundColor(colors.black)
   t.clear()
   t.setCursorPos(1, 1)
 
-  -- Helper local para escribir con color
   local function cprint(color, text)
     t.setTextColor(color)
     t.setCursorPos(1, ({t.getCursorPos()})[2])
@@ -92,11 +86,13 @@ function firstTimeSetup(renderTarget)
     choice = tonumber(read())
   end
 
-  set("vehicle_profile", PROFILES[choice].id)
-  set("vehicle_label",   PROFILES[choice].label)
+  config.set("vehicle_profile", PROFILES[choice].id)
+  config.set("vehicle_label",   PROFILES[choice].label)
 
   cprint(colors.lime, "")
   cprint(colors.lime, " Perfil guardado: " .. PROFILES[choice].label)
   cprint(colors.lightGray, " Puedes cambiarlo desde el menu.")
   sleep(1.5)
 end
+
+return config
