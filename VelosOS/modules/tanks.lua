@@ -4,14 +4,23 @@
 
 local tanks = {}
 
-local TANKS_CFG_KEY = "tank_types"
-local _history = {}
+local TANKS_CFG_KEY  = "tank_types"
+local RATE_SAMPLES   = 8      -- cuantas lecturas para la media movil
+local MIN_DT         = 0.4    -- segundos minimos entre lecturas
+
+local _history = {}   -- { amount, time, samples = {{delta,dt},...} }
 local _types   = {}
 
+-- ============================================================
+--  Init
+-- ============================================================
 function tanks.init()
   _types = config.get(TANKS_CFG_KEY, {})
 end
 
+-- ============================================================
+--  Clasificacion interactiva
+-- ============================================================
 function tanks.classifyTank(tankName, renderTarget)
   local t = renderTarget.term
   t.setBackgroundColor(colors.black)
@@ -53,64 +62,154 @@ function tanks.classifyTank(tankName, renderTarget)
 
   t.setTextColor(colors.lime)
   print("")
-  print(" Clasificado como: " .. (tankType == "fuel" and "Combustible" or "Carga"))
+  print(" Clasificado como: " ..
+    (tankType == "fuel" and "Combustible" or "Carga"))
   sleep(1)
-
   return tankType
 end
 
+-- ============================================================
+--  Leer capacidad total del tank
+--  Create expone capacidad de formas distintas segun version:
+--    1. slot.capacity  (por slot, hay que sumar todos)
+--    2. periph.tankCapacity()  (total directo)
+--  Probamos las dos y nos quedamos con la mayor.
+-- ============================================================
+local function readCapacity(periph, slots)
+  local fromSlots = 0
+  for _, s in ipairs(slots) do
+    fromSlots = fromSlots + (s.capacity or 0)
+  end
+
+  local fromApi = 0
+  local ok, cap = pcall(function() return periph.tankCapacity() end)
+  if ok and type(cap) == "number" then fromApi = cap end
+
+  -- Nos quedamos con el valor mas alto y mas de 0
+  local result = math.max(fromSlots, fromApi)
+  if result <= 0 then result = 1 end
+  return result
+end
+
+-- ============================================================
+--  Leer cantidad total de fluido (suma todos los slots)
+-- ============================================================
+local function readAmount(slots)
+  local total = 0
+  local name  = "Vacio"
+  for _, s in ipairs(slots) do
+    local amt = s.amount or 0
+    total = total + amt
+    if amt > 0 and s.name then name = s.name end
+  end
+  -- Limpiar prefijo de namespace
+  name = name:match(":(.+)$") or name
+  name = name:gsub("_", " ")
+  name = name:sub(1,1):upper() .. name:sub(2)
+  return total, name
+end
+
+-- ============================================================
+--  Media movil de tasa de consumo
+--  Guarda las ultimas RATE_SAMPLES deltas y promedia
+-- ============================================================
+local function updateRate(tankName, amount, now)
+  local h = _history[tankName]
+  if not h then
+    _history[tankName] = { amount=amount, time=now, samples={} }
+    return nil, nil, false
+  end
+
+  local dt = now - h.time
+  if dt < MIN_DT then
+    -- Todavia no paso suficiente tiempo, devolver ultimo calculo
+    return h.lastRate, h.lastTimeLeft, h.lastCharging or false
+  end
+
+  local delta = h.amount - amount   -- positivo = consumiendo
+  local instantRate = delta / dt
+
+  -- Agregar muestra al historial circular
+  local samples = h.samples
+  table.insert(samples, instantRate)
+  if #samples > RATE_SAMPLES then table.remove(samples, 1) end
+
+  -- Calcular media descartando outliers extremos si hay suficientes muestras
+  local rate = 0
+  if #samples >= 3 then
+    -- Ordenar copia y descartar el maximo y minimo
+    local sorted = {}
+    for _, v in ipairs(samples) do table.insert(sorted, v) end
+    table.sort(sorted)
+    local sum, count = 0, 0
+    for i = 2, #sorted - 1 do   -- descartar primero y ultimo
+      sum   = sum   + sorted[i]
+      count = count + 1
+    end
+    rate = count > 0 and (sum / count) or sorted[math.ceil(#sorted/2)]
+  else
+    -- Con pocas muestras simplemente promediamos todo
+    local sum = 0
+    for _, v in ipairs(samples) do sum = sum + v end
+    rate = sum / #samples
+  end
+
+  local timeLeft, charging = nil, false
+
+  if rate < -0.5 then
+    -- Recargando significativamente
+    charging = true
+    rate     = nil
+  elseif rate < 0.5 then
+    -- Variacion minima, consideramos motor apagado o idle
+    rate     = 0
+    timeLeft = nil
+  else
+    timeLeft = amount / rate
+  end
+
+  -- Actualizar historial
+  _history[tankName] = {
+    amount      = amount,
+    time        = now,
+    samples     = samples,
+    lastRate     = rate,
+    lastTimeLeft = timeLeft,
+    lastCharging = charging,
+  }
+
+  return rate, timeLeft, charging
+end
+
+-- ============================================================
+--  Lectura completa de un tank
+-- ============================================================
 function tanks.readTank(tankName, periph)
   local tankType = _types[tankName] or "unknown"
 
-  local ok, fluidTanks = pcall(function() return periph.tanks() end)
-  if not ok or not fluidTanks or #fluidTanks == 0 then
+  local ok, slots = pcall(function() return periph.tanks() end)
+  if not ok or not slots or #slots == 0 then
     return {
-      name = tankName, tankType = tankType,
-      fluid = "Error", amount = 0, capacity = 1, pct = 0,
-      alert = "empty",
+      name=tankName, tankType=tankType,
+      fluid="Error", amount=0, capacity=1, pct=0,
+      alert="empty",
     }
   end
 
-  local slot = fluidTanks[1]
-  for _, s in ipairs(fluidTanks) do
-    if s.amount and s.amount > 0 then slot = s; break end
-  end
+  local amount, fluid = readAmount(slots)
+  local capacity      = readCapacity(periph, slots)
+  local pct           = math.min(1.0, amount / capacity)  -- clamp por seguridad
 
-  local amount   = slot.amount   or 0
-  local capacity = slot.capacity or 1
-  local fluid    = slot.name     or "Vacio"
-  fluid = fluid:match(":(.+)$") or fluid
-  fluid = fluid:sub(1,1):upper() .. fluid:sub(2)
-
-  local pct = amount / capacity
   local rate, timeLeft, charging = nil, nil, false
-
   if tankType == "fuel" then
-    local now  = os.epoch("utc") / 1000
-    local prev = _history[tankName]
-    if prev then
-      local dt = now - prev.time
-      if dt > 0.5 then
-        local delta = prev.amount - amount
-        rate = delta / dt
-        if rate < 0 then
-          charging = true
-        elseif rate < 0.001 then
-          rate = 0
-        else
-          timeLeft = amount / rate
-        end
-        _history[tankName] = { amount = amount, time = now }
-      end
-    else
-      _history[tankName] = { amount = amount, time = now }
-    end
+    local now = os.epoch("utc") / 1000
+    rate, timeLeft, charging = updateRate(tankName, amount, now)
   end
 
   local alert = "ok"
-  if amount == 0       then alert = "empty"
-  elseif pct < 0.05   then alert = "critical"
-  elseif pct < 0.20   then alert = "low"
+  if amount == 0     then alert = "empty"
+  elseif pct < 0.05  then alert = "critical"
+  elseif pct < 0.20  then alert = "low"
   end
 
   return {
@@ -127,53 +226,78 @@ function tanks.readTank(tankName, periph)
   }
 end
 
+-- ============================================================
+--  Render de un tank (4 lineas)
+-- ============================================================
 function tanks.renderTank(t, x, y, w, data)
   local useColor = t.color
 
-  local typeTag = (data.tankType == "fuel") and "[COMB]" or
+  -- Linea 1: nombre del fluido + etiqueta de tipo
+  local typeTag = (data.tankType == "fuel")  and "[COMB]"  or
                   (data.tankType == "cargo") and "[CARGA]" or "[?]"
-  local title = renderer.truncate(data.fluid, w - #typeTag - 1)
+  local title = data.fluid
+  local gap   = w - #title - #typeTag
+  if gap < 1 then
+    title = title:sub(1, w - #typeTag - 2) .. ">"
+    gap   = 1
+  end
   renderer.write(t, x, y,
-    title .. string.rep(" ", w - #title - #typeTag) .. typeTag,
+    title .. string.rep(" ", gap) .. typeTag,
     useColor and colors.white or nil)
 
-  local pctStr = string.format("%3d%%", math.floor(data.pct * 100))
+  -- Linea 2: barra de progreso + porcentaje
+  local pctStr = string.format("%3d%%", math.min(999, math.floor(data.pct * 100)))
   local barW   = w - #pctStr - 1
   local bar    = renderer.progressBar(data.pct, barW)
   renderer.write(t, x, y+1, bar .. " " .. pctStr,
     useColor and renderer.alertColor(data.pct, true) or nil)
 
-  local amtStr = renderer.formatNum(data.amount) .. "/" ..
+  -- Linea 3: cantidad / capacidad
+  local amtStr = renderer.formatNum(data.amount) .. " / " ..
                  renderer.formatNum(data.capacity) .. " mB"
-  renderer.write(t, x, y+2, renderer.truncate(amtStr, w),
+  renderer.write(t, x, y+2,
+    renderer.truncate(amtStr, w),
     useColor and colors.lightGray or nil)
 
-  local statusStr = ""
+  -- Linea 4: estado (solo para combustible)
   if data.tankType == "fuel" then
+    local statusStr, alertFg
+
     if data.alert == "empty" then
       statusStr = "!!! SIN COMBUSTIBLE !!!"
+      alertFg   = useColor and colors.red or nil
     elseif data.charging then
       statusStr = "Cargando..."
+      alertFg   = useColor and colors.cyan or nil
     elseif data.rate == nil then
-      statusStr = "Esperando datos..."
+      statusStr = "Calculando..."
+      alertFg   = useColor and colors.lightGray or nil
     elseif data.rate == 0 then
-      statusStr = "Motor apagado"
+      statusStr = "Motor apagado / idle"
+      alertFg   = useColor and colors.lightGray or nil
     else
-      statusStr = string.format("%.1f mB/s", data.rate) ..
-                  "  |  " .. renderer.formatTime(data.timeLeft) .. " rest."
+      local timeStr = data.timeLeft and
+                      renderer.formatTime(data.timeLeft) or "--:--"
+      statusStr = string.format("%.1f mB/s  |  %s rest.", data.rate, timeStr)
+      alertFg   = useColor and (
+        data.alert == "critical" and colors.red    or
+        data.alert == "low"      and colors.orange or
+        colors.lightGray) or nil
     end
-    local alertFg = useColor and (
-      (data.alert == "empty" or data.alert == "critical") and colors.red or
-      data.alert == "low" and colors.orange or
-      colors.lightGray) or nil
-    renderer.write(t, x, y+3, renderer.truncate(statusStr, w), alertFg)
-  else
+
     renderer.write(t, x, y+3,
-      renderer.truncate("Nivel: " .. string.format("%.1f%%", data.pct*100), w),
+      renderer.truncate(statusStr, w), alertFg)
+  else
+    -- Para carga solo mostramos nivel
+    renderer.write(t, x, y+3,
+      renderer.truncate(string.format("Nivel: %.1f%%", data.pct*100), w),
       useColor and colors.lightGray or nil)
   end
 end
 
+-- ============================================================
+--  Render de todos los tanks
+-- ============================================================
 function tanks.renderAll(renderTarget, x, y, w, h)
   local allTanks = detector.getByType("tank")
   if not next(allTanks) then
@@ -190,24 +314,30 @@ function tanks.renderAll(renderTarget, x, y, w, h)
     if _types[tankName] == nil then
       tanks.classifyTank(tankName, renderTarget)
     end
-    local data = tanks.readTank(tankName, entry.periph)
-    tanks.renderTank(renderTarget, x, y + (row * rowH), w, data)
     if row > 0 then
       renderer.write(renderTarget, x, y + (row * rowH) - 1,
-        string.rep("-", w), renderTarget.color and colors.gray or nil)
+        string.rep("-", w),
+        renderTarget.color and colors.gray or nil)
     end
+    local data = tanks.readTank(tankName, entry.periph)
+    tanks.renderTank(renderTarget, x, y + (row * rowH), w, data)
     row = row + 1
   end
 end
 
+-- ============================================================
+--  Total de combustible para Display Link / header
+-- ============================================================
 function tanks.getTotalFuel()
   local total, cap = 0, 0
   for tankName, entry in pairs(detector.getByType("tank")) do
     if (_types[tankName] or "unknown") == "fuel" then
-      local ok, t = pcall(function() return entry.periph.tanks() end)
-      if ok and t and t[1] then
-        total = total + (t[1].amount   or 0)
-        cap   = cap   + (t[1].capacity or 0)
+      local ok, slots = pcall(function() return entry.periph.tanks() end)
+      if ok and slots then
+        local amt, _ = readAmount(slots)
+        local c      = readCapacity(entry.periph, slots)
+        total = total + amt
+        cap   = cap   + c
       end
     end
   end
