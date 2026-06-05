@@ -199,7 +199,13 @@ function detector.diagnose(renderTarget)
   print(" Presiona cualquier tecla...")
   t.setTextColor(colors.white)
 
-  os.pullEvent("key")
+  -- Ignorar timers y otros eventos hasta recibir una tecla real
+  while true do
+    local ev = os.pullEvent()
+    if ev == "key" or ev == "mouse_click" or ev == "monitor_touch" then
+      break
+    end
+  end
 
   t.setBackgroundColor(colors.black)
   t.clear()
