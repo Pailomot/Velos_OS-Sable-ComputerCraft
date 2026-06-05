@@ -68,6 +68,8 @@ local function writeLine(t, x, y, text, w, fg, bg)
   t.term.setBackgroundColor(colors.black)
 end
 
+local _lastPageDrawn = 0   -- para detectar cambio de pagina
+
 local function clearLines(t, fromY, toY)
   for y = fromY, toY do
     writeLine(t, 1, y, "", t.w)
@@ -336,14 +338,17 @@ local function drawContent(t, profile, contentY, contentH, pageIndex)
 
   -- Paginacion activa
   local totalPages = #layout.pages
-  -- Clamp pagina actual al rango valido
   if pageIndex > totalPages then pageIndex = totalPages end
   if pageIndex < 1          then pageIndex = 1          end
 
   local page = layout.pages[pageIndex]
 
-  -- Limpiar area de contenido antes de dibujar la pagina
-  clearLines(t, contentY, contentY + contentH - 1)
+  -- Solo limpiar el area de contenido cuando cambia la pagina,
+  -- no en cada frame (evita parpadeo)
+  if pageIndex ~= _lastPageDrawn then
+    clearLines(t, contentY, contentY + contentH - 1)
+    _lastPageDrawn = pageIndex
+  end
 
   if page.id == "movimiento" then
     drawMovimiento(t, 1, contentY, w, profile)
@@ -432,13 +437,15 @@ function hud.run(renderTarget)
 
   local function nextPage()
     if lastPageInfo and lastPageInfo.total > 1 then
-      _currentPage = (_currentPage % lastPageInfo.total) + 1
+      _currentPage   = (_currentPage % lastPageInfo.total) + 1
+      _lastPageDrawn = -1   -- forzar limpieza en el siguiente frame
     end
   end
 
   local function prevPage()
     if lastPageInfo and lastPageInfo.total > 1 then
-      _currentPage = ((_currentPage - 2) % lastPageInfo.total) + 1
+      _currentPage   = ((_currentPage - 2) % lastPageInfo.total) + 1
+      _lastPageDrawn = -1
     end
   end
 
@@ -464,14 +471,16 @@ function hud.run(renderTarget)
         menu.init()
         t.term.setBackgroundColor(colors.black)
         t.term.clear()
-        _currentPage = 1
+        _currentPage   = 1
+        _lastPageDrawn = -1
         pushNotif("Widgets actualizados", colors.lime)
       elseif p1 == keys.p then
         config.firstTimeSetup(t)
         profile = config.get("vehicle_profile", "terrestre")
         t.term.setBackgroundColor(colors.black)
         t.term.clear()
-        _currentPage = 1
+        _currentPage   = 1
+        _lastPageDrawn = -1
         pushNotif("Perfil: " .. profile, colors.lime)
       elseif p1 == keys.d then
         detector.diagnose(t)
