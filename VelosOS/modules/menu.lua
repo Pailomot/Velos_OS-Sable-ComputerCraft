@@ -150,16 +150,24 @@ local function drawMenu(t, selected)
   t.term.setCursorPos(1, sepRow)
   t.term.write(string.rep("-", w))
 
-  -- Instrucciones
+  -- Instrucciones adaptativas segun ancho
   local instrRow = sepRow + 1
-  local instr1 = " Arriba/Abajo: mover    Enter: toggle"
-  local instr2 = " Q / Esc: volver al HUD"
   if useC then t.term.setTextColor(colors.lightGray) end
-  t.term.setCursorPos(1, instrRow)
-  t.term.write((instr1 .. string.rep(" ", w)):sub(1, w))
-  if instrRow + 1 <= t.h then
-    t.term.setCursorPos(1, instrRow + 1)
-    t.term.write((instr2 .. string.rep(" ", w)):sub(1, w))
+
+  if w >= 38 then
+    local instr1 = " Arriba/Abajo: mover    Enter: toggle"
+    local instr2 = " Z: volver al HUD"
+    t.term.setCursorPos(1, instrRow)
+    t.term.write((instr1 .. string.rep(" ", w)):sub(1, w))
+    if instrRow + 1 <= t.h then
+      t.term.setCursorPos(1, instrRow + 1)
+      t.term.write((instr2 .. string.rep(" ", w)):sub(1, w))
+    end
+  else
+    -- Pantalla muy pequeña: instruccion minima
+    local instr = " Enter:toggle  Z:salir"
+    t.term.setCursorPos(1, instrRow)
+    t.term.write((instr .. string.rep(" ", w)):sub(1, w))
   end
 end
 
@@ -219,7 +227,7 @@ function menu.open(renderTarget)
         toggleWidget(selected)
         drawMenu(t, selected)
 
-      elseif p1 == keys.q or p1 == keys.escape then
+      elseif p1 == keys.z then
         inMenu = false
       end
 
