@@ -6,7 +6,6 @@ local hud       = {}
 local menu      = require("modules.menu")
 local cannon    = require("modules.cannon")
 local cannon_ui = require("modules.cannon_ui")
-
 local REFRESH_HZ  = 0.25
 local NOTIFY_TIME = 4
 local _notifs     = {}
@@ -249,22 +248,54 @@ local function heightNavegacion()
   return h
 end
 
--- PAGINA 3: Sistemas (Tanks)
+-- PAGINA 3: Sistemas (Tanks + Energia)
 local function drawSistemas(t, x, y, w, h)
-  if menu.isActive("tanks") then
-    tanks.renderAll(t, x, y, w, h)
-  else
+  local line      = y
+  local remaining = h
+
+  if menu.isActive("tanks") and detector.hasType("tank") then
+    local th = math.min(remaining, 10)
+    tanks.renderAll(t, x, line, w, th)
+    line      = line + th
+    remaining = remaining - th
+    if remaining > 1 then
+      writeLine(t, x, line, string.rep("-", w), w,
+        t.color and colors.gray or nil)
+      line = line + 1; remaining = remaining - 1
+    end
+  end
+
+  if menu.isActive("energia") and detector.hasType("energy") and remaining > 4 then
+    energy.renderAll(t, x, line, w, remaining)
+  end
+
+  if not menu.isActive("tanks") and not menu.isActive("energia") then
     writeLine(t, x, y, "Sistemas: sin widgets activos", w,
       t.color and colors.lightGray or nil)
   end
 end
 
 local function heightSistemas()
-  -- Los tanks necesitan al menos 5 lineas por tank
-  if not menu.isActive("tanks") then return 1 end
-  local count = 0
-  for _ in pairs(detector.getByType("tank")) do count = count + 1 end
-  return math.max(5, count * 5)
+  local h = 0
+  if menu.isActive("tanks") then
+    local count = 0
+    for _ in pairs(detector.getByType("tank")) do count = count + 1 end
+    h = h + math.max(5, count * 5)
+  end
+  if menu.isActive("energia") and detector.hasType("energy") then
+    h = h + energy.heightNeeded()
+  end
+  return math.max(h, 1)
+end
+
+-- PAGINA 4: Entorno
+local function drawEntorno(t, x, y, w, h)
+  environment.draw(t, x, y, w)
+end
+
+local function heightEntorno()
+  if not menu.isActive("entorno") then return 0 end
+  return environment.heightNeeded()
 end
 
 -- ============================================================
@@ -275,15 +306,16 @@ local PAGES_DEF = {
   { id = "movimiento", name = "Movimiento" },
   { id = "navegacion", name = "Navegacion" },
   { id = "sistemas",   name = "Sistemas"   },
+  { id = "entorno",    name = "Entorno"    },
   { id = "artilleria", name = "Artilleria" },
 }
 
 local function buildPages(profile, contentH, t, contentY, w)
-  -- Calcular altura de cada pagina
   local heights = {
     movimiento = heightMovimiento(profile),
     navegacion = heightNavegacion(),
     sistemas   = heightSistemas(),
+    entorno    = heightEntorno(),
     artilleria = (menu.isActive("cannon") and cannon.hasAnyCannon())
                  and cannon_ui.heightPage() or 0,
   }
@@ -379,6 +411,8 @@ local function drawContent(t, profile, contentY, contentH, pageIndex)
     drawNavegacion(t, 1, contentY, w)
   elseif page.id == "sistemas" then
     drawSistemas(t, 1, contentY, w, contentH)
+  elseif page.id == "entorno" then
+    drawEntorno(t, 1, contentY, w, contentH)
   elseif page.id == "artilleria" then
     cannon_ui.drawPage(t, 1, contentY, w, contentH)
   end
@@ -428,6 +462,10 @@ function hud.run(renderTarget)
 
   tanks.init()
   menu.init()
+  speaker.init()
+  environment.init()
+  energy.init()
+  chatbox.init()
 
   -- Inicializar cañon si hay hardware disponible
   local cannonAvail = cannon.init()
@@ -464,8 +502,27 @@ function hud.run(renderTarget)
     lastPageInfo   = pageInfo
     if not pageInfo then _currentPage = 1 end
 
-    -- Actualizar apuntado automatico si esta activo
     cannon.updateAutoAim()
+
+    -- Tick de alertas de audio y chat
+    pcall(function() speaker.checkAlerts() end)
+
+    -- Alerta de energia baja
+    if detector.hasType("energy") then
+      local pct = energy.getLowestPct()
+      if pct < 0.05 then
+        pcall(function() speaker.energyLow()      end)
+        pcall(function() chatbox.energyLow(pct)   end)
+      end
+    end
+
+    -- Alerta de combustible via chatbox (speaker ya lo hace en checkAlerts)
+    if detector.hasType("tank") then
+      local fuel, cap = tanks.getTotalFuel()
+      if cap > 0 and (fuel/cap) < 0.05 then
+        pcall(function() chatbox.fuelCritical(fuel/cap) end)
+      end
+    end
 
     drawHeader(t, profile)
     drawFooter(t, pageInfo)
