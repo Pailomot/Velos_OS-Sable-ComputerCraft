@@ -298,29 +298,42 @@ function cannon.getTracks()
 
       -- Etiqueta legible segun entityType
       local eType = t.entityType or "unknown"
+      local isMissile = eType:find("radar_projectile") or
+                        eType:find("cannon_ball") or
+                        eType:find("cannonball") or
+                        (t.category and t.category:find("projectile"))
       local label
-      if eType:find("player") then
+      if isMissile then
+        label = "!! MISIL !!"
+      elseif eType:find("player") then
         label = "Jugador"
       elseif eType:find("sable") then
         label = "Vehiculo"
       else
-        -- Quitar prefijo namespace
         label = eType:match(":(.+)$") or eType
         label = label:gsub("_", " ")
         label = label:sub(1,1):upper() .. label:sub(2)
       end
 
-      table.insert(tracks, {
-        x        = px,
-        y        = py,
-        z        = pz,
-        label    = label,
-        rawType  = eType,
-        dist     = dist,
-        id       = t.id,
-        velocity = t.velocity,
-        category = t.category,
-      })
+      local track = {
+        x         = px,
+        y         = py,
+        z         = pz,
+        label     = label,
+        rawType   = eType,
+        isMissile = isMissile and true or false,
+        dist      = dist,
+        id        = t.id,
+        velocity  = t.velocity,
+        category  = t.category,
+      }
+      table.insert(tracks, track)
+
+      -- Alerta inmediata si es misil
+      if isMissile then
+        pcall(function() speaker.missilWarning()         end)
+        pcall(function() chatbox.missilWarning(dist)     end)
+      end
     end
   end
 
