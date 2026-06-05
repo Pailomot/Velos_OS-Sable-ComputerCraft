@@ -58,13 +58,38 @@ function tanks.classifyTank(tankName, renderTarget)
 
   local tankType = (choice == 1) and "fuel" or "cargo"
   _types[tankName] = tankType
+
+  -- Preguntar capacidad maxima manual
+  t.setTextColor(colors.white)
+  print("")
+  print(" Capacidad maxima del tank (mB)?")
+  print(" (Ej: 10000, 16000, 32000...)")
+  print(" Escribe 0 para detectar auto:")
+  t.setTextColor(colors.white)
+
+  local capInput = tonumber(read())
+  while capInput == nil or capInput < 0 do
+    t.setTextColor(colors.red)
+    print(" Numero invalido, intenta de nuevo:")
+    t.setTextColor(colors.white)
+    capInput = tonumber(read())
+  end
+
+  -- Guardar capacidad manual (0 = usar API)
+  local capKey = "tank_cap_" .. tankName
+  config.set(capKey, capInput > 0 and capInput or nil)
   config.set(TANKS_CFG_KEY, _types)
 
   t.setTextColor(colors.lime)
   print("")
   print(" Clasificado como: " ..
     (tankType == "fuel" and "Combustible" or "Carga"))
-  sleep(1)
+  if capInput > 0 then
+    print(" Capacidad: " .. capInput .. " mB")
+  else
+    print(" Capacidad: deteccion automatica")
+  end
+  sleep(1.5)
   return tankType
 end
 
@@ -75,7 +100,11 @@ end
 --    2. periph.tankCapacity()  (total directo)
 --  Probamos las dos y nos quedamos con la mayor.
 -- ============================================================
-local function readCapacity(periph, slots)
+local function readCapacity(periph, slots, tankName)
+  if tankName then
+    local manual = config.get("tank_cap_" .. tankName, nil)
+    if manual and manual > 0 then return manual end
+  end
   local fromSlots = 0
   for _, s in ipairs(slots) do
     fromSlots = fromSlots + (s.capacity or 0)
@@ -197,7 +226,7 @@ function tanks.readTank(tankName, periph)
   end
 
   local amount, fluid = readAmount(slots)
-  local capacity      = readCapacity(periph, slots)
+  local capacity      = readCapacity(periph, slots, tankName)
   local pct           = math.min(1.0, amount / capacity)  -- clamp por seguridad
 
   local rate, timeLeft, charging = nil, nil, false
@@ -335,7 +364,7 @@ function tanks.getTotalFuel()
       local ok, slots = pcall(function() return entry.periph.tanks() end)
       if ok and slots then
         local amt, _ = readAmount(slots)
-        local c      = readCapacity(entry.periph, slots)
+        local c      = readCapacity(entry.periph, slots, tankName)
         total = total + amt
         cap   = cap   + c
       end
