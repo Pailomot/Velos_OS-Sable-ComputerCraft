@@ -2,8 +2,10 @@
 --  VelosOS  |  modules/hud.lua
 -- ============================================================
 
-local hud  = {}
-local menu = require("modules.menu")
+local hud       = {}
+local menu      = require("modules.menu")
+local cannon    = require("modules.cannon")
+local cannon_ui = require("modules.cannon_ui")
 
 local REFRESH_HZ  = 0.25
 local NOTIFY_TIME = 4
@@ -270,9 +272,10 @@ end
 --  Construye la lista de paginas activas y decide si paginar
 -- ============================================================
 local PAGES_DEF = {
-  { id = "movimiento", name = "Movimiento", heightFn = nil, drawFn = nil },
-  { id = "navegacion", name = "Navegacion", heightFn = nil, drawFn = nil },
-  { id = "sistemas",   name = "Sistemas",   heightFn = nil, drawFn = nil },
+  { id = "movimiento", name = "Movimiento" },
+  { id = "navegacion", name = "Navegacion" },
+  { id = "sistemas",   name = "Sistemas"   },
+  { id = "artilleria", name = "Artilleria" },
 }
 
 local function buildPages(profile, contentH, t, contentY, w)
@@ -281,6 +284,8 @@ local function buildPages(profile, contentH, t, contentY, w)
     movimiento = heightMovimiento(profile),
     navegacion = heightNavegacion(),
     sistemas   = heightSistemas(),
+    artilleria = (menu.isActive("cannon") and cannon.hasAnyCannon())
+                 and cannon_ui.heightPage() or 0,
   }
 
   -- Filtrar paginas con contenido
@@ -374,6 +379,8 @@ local function drawContent(t, profile, contentY, contentH, pageIndex)
     drawNavegacion(t, 1, contentY, w)
   elseif page.id == "sistemas" then
     drawSistemas(t, 1, contentY, w, contentH)
+  elseif page.id == "artilleria" then
+    cannon_ui.drawPage(t, 1, contentY, w, contentH)
   end
 
   return {
@@ -422,6 +429,18 @@ function hud.run(renderTarget)
   tanks.init()
   menu.init()
 
+  -- Inicializar cañon si hay hardware disponible
+  local cannonAvail = cannon.init()
+  if cannonAvail and not config.get(cannon.KEYS_CFG or "cannon_keys") then
+    -- Primer arranque con cañon: configurar teclas
+    cannon.setupKeys(t)
+    t.term.setBackgroundColor(colors.black)
+    t.term.clear()
+  end
+
+  -- Buscar monitor dedicado para artilleria
+  cannon_ui.findDedicatedMonitor(t)
+
   t.term.setBackgroundColor(colors.black)
   t.term.setTextColor(colors.white)
   t.term.clear()
@@ -443,14 +462,18 @@ function hud.run(renderTarget)
 
     local pageInfo = drawContent(t, profile, contentY, getContentH(), _currentPage)
     lastPageInfo   = pageInfo
-
-    -- Si la paginacion desaparecio (todo cabe ahora), resetear pagina
     if not pageInfo then _currentPage = 1 end
+
+    -- Actualizar apuntado automatico si esta activo
+    cannon.updateAutoAim()
 
     drawHeader(t, profile)
     drawFooter(t, pageInfo)
     drawNotifs(t)
     renderDisplayLinks(profile)
+
+    -- Render en monitor dedicado de artilleria
+    cannon_ui.drawMonitor()
   end
 
   local function nextPage()
@@ -484,7 +507,25 @@ function hud.run(renderTarget)
         nextPage()
       elseif p1 == keys.left or p1 == keys.comma then
         prevPage()
-      elseif p1 == keys.m then
+      -- Navegacion de tracks en pagina artilleria
+      elseif lastPageInfo and lastPageInfo.name == "Artilleria" then
+        if p1 == keys.up then
+          cannon_ui.selectPrevTrack()
+        elseif p1 == keys.down then
+          cannon_ui.selectNextTrack()
+        elseif p1 == keys.enter then
+          cannon_ui.confirmTarget()
+        else
+          -- Teclas del cañon (yaw, pitch, fire, etc)
+          cannon.handleKey(p1)
+        end
+      else
+        -- Teclas del cañon funcionan en cualquier pagina
+        cannon.handleKey(p1)
+      end
+
+      -- Teclas de sistema (siempre activas)
+      if p1 == keys.m then
         menu.open(t)
         menu.init()
         t.term.setBackgroundColor(colors.black)
@@ -536,12 +577,22 @@ function hud.run(renderTarget)
       if entry then
         pushNotif("+ " .. entry.label, colors.lime)
         if entry.osType == "tank" then tanks.init() end
+        if entry.osType == "cannon" or entry.osType:find("^cr_") then
+          cannon.init()
+          cannon_ui.findDedicatedMonitor(t)
+        end
+        if entry.osType == "monitor" then
+          cannon_ui.findDedicatedMonitor(t)
+        end
       end
 
     elseif ev == "peripheral_detach" then
       local was = detector.onDetach(p1)
       if was then
         pushNotif("- " .. was.label, colors.orange)
+        if was.osType == "cannon" or (was.osType and was.osType:find("^cr_")) then
+          cannon.init()
+        end
       end
     end
   end

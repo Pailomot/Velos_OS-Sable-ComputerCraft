@@ -1,0 +1,498 @@
+-- ============================================================
+--  VelosOS  |  modules/cannon.lua
+--  Control de artilleria:
+--    - CBC (cbc_cannon_mount) para apuntar y disparar
+--    - Create Radar controllers como alternativa/complemento
+--    - Radar bearing/monitor para seleccion de objetivos
+--    - Fallback graceful si falta cualquier componente
+-- ============================================================
+
+local cannon = {}
+
+-- ============================================================
+--  Estado interno
+-- ============================================================
+local _state = {
+  -- Perifericos disponibles (nil si no estan)
+  cbc        = nil,   -- cbc_cannon_mount
+  crYaw      = nil,   -- create_radar:auto_yaw_controller
+  crPitch    = nil,   -- create_radar:auto_pitch_controller
+  crFire     = nil,   -- create_radar:fire_controller
+  crMonitor  = nil,   -- create_radar:monitor
+  crBearing  = nil,   -- create_radar:radar_bearing
+  crPlane    = nil,   -- create_radar:plane_radar
+  playerDet  = nil,   -- playerDetector (Advanced Peripherals)
+
+  -- Modo de apuntado: "manual" | "player" | "radar" | "coords"
+  aimMode    = "manual",
+
+  -- Objetivo actual
+  target     = nil,   -- { x, y, z, label, type }
+
+  -- Teclas asignadas (se cargan de config)
+  keys       = {},
+
+  -- Ultimo angulo enviado
+  lastYaw    = 0,
+  lastPitch  = 0,
+
+  -- Paso de apuntado manual (grados por pulsacion)
+  stepCoarse = 5.0,
+  stepFine   = 0.5,
+  fineMode   = false,
+}
+
+local KEYS_CFG = "cannon_keys"
+local DEFAULT_KEYS = {
+  yawLeft   = keys.a,
+  yawRight  = keys.d,
+  pitchUp   = keys.w,
+  pitchDown = keys.s,
+  fire      = keys.f,
+  toggleFine = keys.g,
+  cycleMode = keys.tab,
+}
+
+-- ============================================================
+--  Init: detectar perifericos y cargar config
+-- ============================================================
+function cannon.init()
+  -- CBC
+  local cbcEntry = detector.getByType("cannon")
+  for _, e in pairs(cbcEntry) do _state.cbc = e.periph; break end
+
+  -- Create Radar controllers
+  for t, field in pairs({
+    cr_yaw     = "crYaw",
+    cr_pitch   = "crPitch",
+    cr_fire    = "crFire",
+    cr_monitor = "crMonitor",
+    cr_bearing = "crBearing",
+    cr_plane   = "crPlane",
+  }) do
+    local entries = detector.getByType(t)
+    for _, e in pairs(entries) do _state[field] = e.periph; break end
+  end
+
+  -- Player Detector
+  local pdEntry = detector.getByType("radar")
+  for _, e in pairs(pdEntry) do _state.playerDet = e.periph; break end
+
+  -- Cargar teclas
+  local saved = config.get(KEYS_CFG, nil)
+  if saved then
+    _state.keys = saved
+  else
+    _state.keys = DEFAULT_KEYS
+  end
+
+  -- Tomar control CBC si esta disponible
+  if _state.cbc then
+    pcall(function() _state.cbc.setComputerControl(true) end)
+  end
+
+  return cannon.hasAnyCannon()
+end
+
+-- ============================================================
+--  Capacidades disponibles
+-- ============================================================
+function cannon.hasAnyCannon()
+  return _state.cbc ~= nil or _state.crYaw ~= nil
+end
+
+function cannon.hasRadar()
+  return _state.crBearing ~= nil or _state.crMonitor ~= nil
+        or _state.crPlane ~= nil
+end
+
+function cannon.hasCBC()
+  return _state.cbc ~= nil
+end
+
+function cannon.hasFireController()
+  return _state.crFire ~= nil
+end
+
+-- Descripcion de lo que hay disponible
+function cannon.getHardwareSummary()
+  local parts = {}
+  if _state.cbc       then table.insert(parts, "CBC") end
+  if _state.crYaw     then table.insert(parts, "Yaw-Ctrl") end
+  if _state.crPitch   then table.insert(parts, "Pitch-Ctrl") end
+  if _state.crFire    then table.insert(parts, "Fire-Ctrl") end
+  if _state.crMonitor then table.insert(parts, "Radar-Mon") end
+  if _state.crBearing then table.insert(parts, "Radar-Brg") end
+  if _state.crPlane   then table.insert(parts, "PlaneRadar") end
+  if _state.playerDet then table.insert(parts, "PlayerDet") end
+  if #parts == 0 then return "Sin hardware de artilleria" end
+  return table.concat(parts, " | ")
+end
+
+-- ============================================================
+--  Ensamblado (solo CBC)
+-- ============================================================
+function cannon.assemble()
+  if not _state.cbc then return false, "Sin CBC" end
+  if _state.cbc.isAssembled() then return true end
+  local ok, err = _state.cbc.assemble()
+  return ok, err
+end
+
+function cannon.disassemble()
+  if not _state.cbc then return false, "Sin CBC" end
+  return _state.cbc.disassemble()
+end
+
+function cannon.isAssembled()
+  if _state.cbc then return _state.cbc.isAssembled() end
+  -- Sin CBC asumimos que los controllers de radar son independientes
+  return _state.crYaw ~= nil
+end
+
+function cannon.getState()
+  if _state.cbc then
+    local ok, s = pcall(function() return _state.cbc.getState() end)
+    if ok then return s end
+  end
+  return "unknown"
+end
+
+-- ============================================================
+--  Apuntado — backend unificado
+--  Usa Create Radar controllers si estan, CBC como fallback
+-- ============================================================
+function cannon.setYaw(deg)
+  _state.lastYaw = deg
+  if _state.crYaw then
+    pcall(function() _state.crYaw.setAngle(deg) end)
+  elseif _state.cbc then
+    pcall(function() _state.cbc.setTargetYaw(deg) end)
+  end
+end
+
+function cannon.setPitch(deg)
+  _state.lastPitch = deg
+  if _state.crPitch then
+    pcall(function() _state.crPitch.setAngle(deg) end)
+  elseif _state.cbc then
+    pcall(function() _state.cbc.setTargetPitch(deg) end)
+  end
+end
+
+function cannon.getYaw()
+  if _state.crYaw then
+    local ok, v = pcall(function() return _state.crYaw.getAngle() end)
+    if ok then return v end
+  end
+  if _state.cbc then
+    local ok, v = pcall(function() return _state.cbc.getYaw() end)
+    if ok then return v end
+  end
+  return _state.lastYaw
+end
+
+function cannon.getPitch()
+  if _state.crPitch then
+    local ok, v = pcall(function() return _state.crPitch.getAngle() end)
+    if ok then return v end
+  end
+  if _state.cbc then
+    local ok, v = pcall(function() return _state.cbc.getPitch() end)
+    if ok then return v end
+  end
+  return _state.lastPitch
+end
+
+function cannon.isAiming()
+  if _state.cbc then
+    local ok, v = pcall(function() return _state.cbc.isAiming() end)
+    if ok then return v end
+  end
+  return false
+end
+
+-- Apuntar a coordenadas absolutas del mundo
+-- Usa la posicion actual del vehiculo como origen
+function cannon.aimAtCoords(tx, ty, tz)
+  local pose = sublevel.getLogicalPose()
+  local cx, cy, cz = pose.position.x, pose.position.y, pose.position.z
+
+  local dx = tx - cx
+  local dy = ty - cy
+  local dz = tz - cz
+
+  local yaw   = math.deg(math.atan2(-dx, dz))
+  local dist  = math.sqrt(dx*dx + dz*dz)
+  local pitch = math.deg(math.atan2(dy, dist))
+
+  cannon.setYaw(yaw)
+  cannon.setPitch(pitch)
+
+  return yaw, pitch
+end
+
+-- ============================================================
+--  Disparo — usa fire_controller si esta, CBC como fallback
+-- ============================================================
+function cannon.fire()
+  -- Prioridad: Create Radar fire controller
+  if _state.crFire then
+    local ok, err = pcall(function()
+      _state.crFire.setPowered(true)
+      _state.crFire.fireOn()
+    end)
+    -- Apagar despues de un tick
+    os.sleep(0.1)
+    pcall(function()
+      _state.crFire.fireOff()
+      _state.crFire.setPowered(false)
+    end)
+    return ok, err
+  end
+
+  -- Fallback: CBC
+  if _state.cbc then
+    if not _state.cbc.isAssembled() then
+      return false, "Canon no ensamblado"
+    end
+    if not _state.cbc.isLoaded() then
+      return false, "Canon no cargado"
+    end
+    return _state.cbc.fire()
+  end
+
+  return false, "Sin hardware de disparo"
+end
+
+function cannon.isLoaded()
+  if _state.cbc then
+    local ok, v = pcall(function() return _state.cbc.isLoaded() end)
+    if ok then return v end
+  end
+  return nil   -- desconocido sin CBC
+end
+
+-- ============================================================
+--  Radar — obtener objetivos
+-- ============================================================
+
+-- Devuelve lista unificada de tracks de todos los radares
+-- Cada track: { x, y, z, label, type, dist, id, velocity }
+function cannon.getTracks()
+  local tracks = {}
+  local pose   = sublevel.getLogicalPose()
+  local ox, oy, oz = pose.position.x, pose.position.y, pose.position.z
+
+  local function addTracks(periph)
+    local ok, raw = pcall(function() return periph.getTracks() end)
+    if not ok or not raw then return end
+    for _, t in pairs(raw) do
+      local px = t.position and t.position.x or 0
+      local py = t.position and t.position.y or 0
+      local pz = t.position and t.position.z or 0
+      local dx = px - ox
+      local dy = py - oy
+      local dz = pz - oz
+      local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+
+      -- Etiqueta legible segun entityType
+      local eType = t.entityType or "unknown"
+      local label
+      if eType:find("player") then
+        label = "Jugador"
+      elseif eType:find("sable") then
+        label = "Vehiculo"
+      else
+        -- Quitar prefijo namespace
+        label = eType:match(":(.+)$") or eType
+        label = label:gsub("_", " ")
+        label = label:sub(1,1):upper() .. label:sub(2)
+      end
+
+      table.insert(tracks, {
+        x        = px,
+        y        = py,
+        z        = pz,
+        label    = label,
+        rawType  = eType,
+        dist     = dist,
+        id       = t.id,
+        velocity = t.velocity,
+        category = t.category,
+      })
+    end
+  end
+
+  if _state.crBearing  then addTracks(_state.crBearing)  end
+  if _state.crMonitor  then addTracks(_state.crMonitor)   end
+  if _state.crPlane    then addTracks(_state.crPlane)     end
+
+  -- Tambien del playerDetector si no hay radar
+  if #tracks == 0 and _state.playerDet then
+    local ok, players = pcall(function()
+      return _state.playerDet.getPlayersInRange(256)
+    end)
+    if ok and players then
+      for _, name in ipairs(players) do
+        local ok2, p = pcall(function()
+          return _state.playerDet.getPlayer(name)
+        end)
+        if ok2 and p then
+          local dx = p.x - ox
+          local dy = p.y - oy
+          local dz = p.z - oz
+          table.insert(tracks, {
+            x     = p.x, y = p.y, z = p.z,
+            label = "Jugador: " .. name,
+            rawType = "player",
+            dist  = math.sqrt(dx*dx + dy*dy + dz*dz),
+            id    = name,
+          })
+        end
+      end
+    end
+  end
+
+  -- Ordenar por distancia
+  table.sort(tracks, function(a, b) return a.dist < b.dist end)
+  return tracks
+end
+
+-- ============================================================
+--  Modos de apuntado
+-- ============================================================
+function cannon.getAimMode() return _state.aimMode end
+
+function cannon.cycleAimMode()
+  local modes = {"manual", "coords"}
+  if cannon.hasRadar() or _state.playerDet then
+    table.insert(modes, "radar")
+  end
+  for i, m in ipairs(modes) do
+    if m == _state.aimMode then
+      _state.aimMode = modes[(i % #modes) + 1]
+      return _state.aimMode
+    end
+  end
+  _state.aimMode = "manual"
+  return _state.aimMode
+end
+
+function cannon.setTarget(track)
+  _state.target = track
+end
+
+function cannon.getTarget() return _state.target end
+
+-- Actualiza apuntado automatico si hay objetivo y modo lo requiere
+function cannon.updateAutoAim()
+  if _state.aimMode == "manual" then return end
+  if not _state.target then return end
+  cannon.aimAtCoords(_state.target.x, _state.target.y, _state.target.z)
+end
+
+-- ============================================================
+--  Paso manual con teclas asignadas
+-- ============================================================
+function cannon.getStep()
+  if _state.fineMode then return _state.stepFine end
+  return _state.stepCoarse
+end
+
+function cannon.handleKey(keyCode)
+  local k = _state.keys
+  local step = cannon.getStep()
+  local handled = false
+
+  if keyCode == k.yawLeft then
+    cannon.setYaw(cannon.getYaw() - step); handled = true
+  elseif keyCode == k.yawRight then
+    cannon.setYaw(cannon.getYaw() + step); handled = true
+  elseif keyCode == k.pitchUp then
+    cannon.setPitch(math.min(90, cannon.getPitch() + step)); handled = true
+  elseif keyCode == k.pitchDown then
+    cannon.setPitch(math.max(-90, cannon.getPitch() - step)); handled = true
+  elseif keyCode == k.fire then
+    cannon.fire(); handled = true
+  elseif keyCode == k.toggleFine then
+    _state.fineMode = not _state.fineMode; handled = true
+  elseif keyCode == k.cycleMode then
+    cannon.cycleAimMode(); handled = true
+  end
+
+  return handled
+end
+
+-- ============================================================
+--  Setup interactivo de teclas
+-- ============================================================
+function cannon.setupKeys(renderTarget)
+  local t    = renderTarget.term
+  local useC = renderTarget.color
+  local w    = renderTarget.w
+
+  t.setBackgroundColor(colors.black)
+  t.clear()
+  t.setCursorPos(1,1)
+
+  local function line(text, fg)
+    if useC and fg then t.setTextColor(fg) end
+    print(text:sub(1, w))
+  end
+
+  local function waitKey(prompt)
+    line(prompt, colors.white)
+    while true do
+      local ev, code = os.pullEvent()
+      if ev == "key" then return code end
+    end
+  end
+
+  line("============================", colors.yellow)
+  line("  CONFIG. TECLAS DEL CANON  ", colors.yellow)
+  line("============================", colors.yellow)
+  line("")
+  line("Presiona la tecla para cada", colors.lightGray)
+  line("funcion cuando se indique.", colors.lightGray)
+  line("")
+
+  local assignments = {}
+  local prompts = {
+    { id = "yawLeft",    label = "  Yaw izquierda : " },
+    { id = "yawRight",   label = "  Yaw derecha   : " },
+    { id = "pitchUp",    label = "  Pitch arriba  : " },
+    { id = "pitchDown",  label = "  Pitch abajo   : " },
+    { id = "fire",       label = "  DISPARAR      : " },
+    { id = "toggleFine", label = "  Paso fino/bruto: " },
+    { id = "cycleMode",  label = "  Cambiar modo  : " },
+  }
+
+  for _, p in ipairs(prompts) do
+    local code = waitKey(p.label)
+    assignments[p.id] = code
+    -- Mostrar nombre de la tecla asignada
+    local y = ({t.getCursorPos()})[2] - 1
+    t.setCursorPos(#p.label + 1, y)
+    if useC then t.setTextColor(colors.lime) end
+    t.write("[" .. keys.getName(code) .. "]  ")
+    t.setCursorPos(1, y + 1)
+  end
+
+  _state.keys = assignments
+  config.set(KEYS_CFG, assignments)
+
+  line("", colors.white)
+  line("Teclas guardadas!", colors.lime)
+  sleep(1.5)
+end
+
+-- ============================================================
+--  Getters de estado para la UI
+-- ============================================================
+function cannon.getKeys()     return _state.keys end
+function cannon.isFineMode()  return _state.fineMode end
+function cannon.getLastYaw()  return _state.lastYaw end
+function cannon.getLastPitch() return _state.lastPitch end
+
+return cannon
