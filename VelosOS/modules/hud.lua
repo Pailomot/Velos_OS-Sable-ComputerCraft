@@ -110,23 +110,41 @@ end
 -- Footer adaptativo: muestra indicador de pagina si hay paginacion activa
 local function drawFooter(t, pageInfo)
   local useC = t.color
+  local w    = t.w
   local hint
 
   if pageInfo and pageInfo.total > 1 then
-    -- Mostrar indicador de pagina centrado, controles a los lados
-    local pagLabel = string.format("< Pag %d/%d >", pageInfo.current, pageInfo.total)
-    local pagName  = "  " .. pageInfo.name .. "  "
-    -- Izquierda: controles
-    local left  = " [<][>]Pag [M]Menu [Q]Sal"
-    -- Centro: pagina actual
-    local right = pagName .. pagLabel .. " "
-    local gap   = math.max(1, t.w - #left - #right)
-    hint = left .. string.rep(" ", gap) .. right
+    -- Con paginacion activa
+    local pagLabel = string.format("< %d/%d >", pageInfo.current, pageInfo.total)
+    local pagName  = pageInfo.name
+
+    if w >= 50 then
+      local left  = " [<][>]Pag [M]Menu [Q]Sal"
+      local right = "  " .. pagName .. "  " .. pagLabel .. " "
+      local gap   = math.max(1, w - #left - #right)
+      hint = left .. string.rep(" ", gap) .. right
+    elseif w >= 30 then
+      -- Compacto: solo paginacion y salir
+      local left  = " [<][>] [M] [Q]"
+      local right = " " .. pagLabel .. " "
+      local gap   = math.max(1, w - #left - #right)
+      hint = left .. string.rep(" ", gap) .. right
+    else
+      -- Minimo: solo indicador de pagina
+      hint = " " .. pagLabel
+    end
   else
-    hint = " [Q]Salir [M]Widgets [P]Perfil [D]Diag"
+    -- Sin paginacion
+    if w >= 42 then
+      hint = " [Q]Salir [M]Widgets [P]Perfil [D]Diag"
+    elseif w >= 28 then
+      hint = " [Q]Sal [M]Widget [P]Perf"
+    else
+      hint = " [Q] [M] [P] [D]"
+    end
   end
 
-  writeLine(t, 1, t.h, hint, t.w,
+  writeLine(t, 1, t.h, hint, w,
     useC and colors.black or nil,
     useC and colors.gray  or nil)
 end
