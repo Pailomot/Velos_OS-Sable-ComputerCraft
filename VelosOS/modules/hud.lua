@@ -2,7 +2,8 @@
 --  VelosOS  |  modules/hud.lua
 -- ============================================================
 
-local hud = {}
+local hud  = {}
+local menu = require("modules.menu")
 
 local REFRESH_HZ  = 0.25
 local NOTIFY_TIME = 4
@@ -108,7 +109,7 @@ local function drawHeader(t, profile)
 end
 
 local function drawFooter(t)
-  local hint = " [Q]Salir  [P]Perfil  [T]Tanks"
+  local hint = " [Q]Salir [M]Widgets [P]Perfil [D]Diag"
   writeLine(t, 1, t.h, hint, t.w,
     t.color and colors.black or nil,
     t.color and colors.gray  or nil)
@@ -232,6 +233,7 @@ function hud.run(renderTarget)
   local profile = config.get("vehicle_profile", "terrestre")
 
   tanks.init()
+  menu.init()
 
   -- Limpiar UNA sola vez al arrancar
   t.term.setBackgroundColor(colors.black)
@@ -287,13 +289,22 @@ function hud.run(renderTarget)
     elseif ev == "key" then
       if p1 == keys.q then
         running = false
+      elseif p1 == keys.m then
+        menu.open(t)
+        menu.init()
+        t.term.setBackgroundColor(colors.black)
+        t.term.clear()
+        pushNotif("Widgets actualizados", colors.lime)
       elseif p1 == keys.p then
         config.firstTimeSetup(t)
         profile = config.get("vehicle_profile", "terrestre")
-        -- Limpiar pantalla al volver del menu de configuracion
         t.term.setBackgroundColor(colors.black)
         t.term.clear()
         pushNotif("Perfil: " .. profile, colors.lime)
+      elseif p1 == keys.d then
+        detector.diagnose(t)
+        t.term.setBackgroundColor(colors.black)
+        t.term.clear()
       elseif p1 == keys.t then
         config.set("tank_types", {})
         tanks.init()
