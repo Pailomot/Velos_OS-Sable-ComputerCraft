@@ -192,36 +192,33 @@ end
 
 -- ============================================================
 --  Display Links secundarios
+--  Solo espejo de datos del vehiculo (Sable).
+--  El Display Link no puede leer tanks de Create directamente.
 -- ============================================================
 local function renderDisplayLinks(profile)
   for _, dl in ipairs(renderer.getExtras()) do
     local dt = dl.term
     local w  = dl.w
 
-    -- Sobreescribir linea a linea sin clear
     local function dlLine(y, text)
-      local available = w
-      if #text > available then text = text:sub(1, available-1) .. ">" end
-      text = text .. string.rep(" ", available - #text)
+      if #text > w then text = text:sub(1, w-1) .. ">" end
+      text = text .. string.rep(" ", w - #text)
       dt.setCursorPos(1, y)
       dt.write(text)
     end
 
     local vel  = sublevel.getVelocity()
     local pose = sublevel.getLogicalPose()
+    local spd  = speed(vel)
+    local spd_h = math.sqrt(vel.x*vel.x + vel.z*vel.z)
 
     dlLine(1, "VELOS OS | " .. profile:upper())
-    dlLine(2, string.format("Vel: %.1f m/s", speed(vel)))
-    dlLine(3, string.format("Alt: %.1f m",   pose.position.y))
-    dlLine(4, string.format("X:%.0f  Z:%.0f", pose.position.x, pose.position.z))
-
-    if detector.hasType("tank") then
-      local fuel, cap = tanks.getTotalFuel()
-      local pct = cap > 0 and (fuel/cap*100) or 0
-      dlLine(5, string.format("Comb: %.0f%% (%d mB)", pct, fuel))
-    else
-      dlLine(5, "")
-    end
+    dlLine(2, string.format("Vel:  %.1f m/s", spd))
+    dlLine(3, string.format("Hor:  %.1f m/s", spd_h))
+    dlLine(4, string.format("Alt:  %.1f m",   pose.position.y))
+    dlLine(5, string.format("X:%.0f  Z:%.0f", pose.position.x, pose.position.z))
+    -- Lineas extra vacias para limpiar residuos
+    for extraY = 6, dl.h do dlLine(extraY, "") end
   end
 end
 
