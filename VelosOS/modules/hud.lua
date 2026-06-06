@@ -53,28 +53,16 @@ local function horizonBar(pitch, roll, width)
 end
 
 -- ============================================================
---  Escritura sin parpadeo
+--  Escritura sin parpadeo — alias de renderer para comodidad
 -- ============================================================
 local function writeLine(t, x, y, text, w, fg, bg)
-  local available = w - x + 1
-  if #text > available then
-    text = string.sub(text, 1, available - 1) .. ">"
-  else
-    text = text .. string.rep(" ", available - #text)
-  end
-  if fg then t.term.setTextColor(fg) end
-  if bg then t.term.setBackgroundColor(bg) end
-  t.term.setCursorPos(x, y)
-  t.term.write(text)
-  t.term.setBackgroundColor(colors.black)
+  renderer.writeLine(t, x, y, text, w, fg, bg)
 end
 
-local _lastPageDrawn = 0   -- para detectar cambio de pagina
+local _lastPageDrawn = 0
 
 local function clearLines(t, fromY, toY)
-  for y = fromY, toY do
-    writeLine(t, 1, y, "", t.w)
-  end
+  renderer.clearLines(t, fromY, toY)
 end
 
 -- ============================================================
@@ -303,21 +291,30 @@ end
 --  Construye la lista de paginas activas y decide si paginar
 -- ============================================================
 local PAGES_DEF = {
-  { id = "movimiento", name = "Movimiento" },
-  { id = "navegacion", name = "Navegacion" },
-  { id = "sistemas",   name = "Sistemas"   },
-  { id = "entorno",    name = "Entorno"    },
-  { id = "artilleria", name = "Artilleria" },
+  { id = "movimiento",   name = "Movimiento"  },
+  { id = "navegacion",   name = "Navegacion"  },
+  { id = "sistemas",     name = "Sistemas"    },
+  { id = "entorno",      name = "Entorno"     },
+  { id = "inventario",   name = "Inventario"  },
+  { id = "red",          name = "Red"         },
+  { id = "display_ext",  name = "Display Ext" },
+  { id = "artilleria",   name = "Artilleria"  },
 }
 
 local function buildPages(profile, contentH, t, contentY, w)
   local heights = {
-    movimiento = heightMovimiento(profile),
-    navegacion = heightNavegacion(),
-    sistemas   = heightSistemas(),
-    entorno    = heightEntorno(),
-    artilleria = (menu.isActive("cannon") and cannon.hasAnyCannon())
-                 and cannon_ui.heightPage() or 0,
+    movimiento  = heightMovimiento(profile),
+    navegacion  = heightNavegacion(),
+    sistemas    = heightSistemas(),
+    entorno     = heightEntorno(),
+    inventario  = (menu.isActive("inventario") and detector.hasType("inventory"))
+                  and inventory.heightNeeded() or 0,
+    red         = (menu.isActive("red") and detector.hasType("modem"))
+                  and modem_mod.heightNeeded() or 0,
+    display_ext = (menu.isActive("display_ext") and detector.hasType("display_target"))
+                  and display_target.heightNeeded() or 0,
+    artilleria  = (menu.isActive("cannon") and cannon.hasAnyCannon())
+                  and cannon_ui.heightPage() or 0,
   }
 
   -- Filtrar paginas con contenido
@@ -413,6 +410,12 @@ local function drawContent(t, profile, contentY, contentH, pageIndex)
     drawSistemas(t, 1, contentY, w, contentH)
   elseif page.id == "entorno" then
     drawEntorno(t, 1, contentY, w, contentH)
+  elseif page.id == "inventario" then
+    inventory.renderAll(t, 1, contentY, w, contentH)
+  elseif page.id == "red" then
+    modem_mod.renderAll(t, 1, contentY, w, contentH)
+  elseif page.id == "display_ext" then
+    display_target.renderAll(t, 1, contentY, w, contentH)
   elseif page.id == "artilleria" then
     cannon_ui.drawPage(t, 1, contentY, w, contentH)
   end
@@ -466,17 +469,58 @@ function hud.run(renderTarget)
   environment.init()
   energy.init()
   chatbox.init()
+  inventory.init()
+  modem_mod.init()
+  display_target.init()
 
   -- Inicializar cañon si hay hardware disponible
   local cannonAvail = cannon.init()
-  if cannonAvail and not config.get(cannon.KEYS_CFG or "cannon_keys") then
-    -- Primer arranque con cañon: configurar teclas
-    cannon.setupKeys(t)
-    t.term.setBackgroundColor(colors.black)
-    t.term.clear()
+  if cannonAvail then
+    -- Preguntar si quiere activar artilleria (solo si no esta ya configurado)
+    if config.get("cannon_asked") == nil then
+      t.term.setBackgroundColor(colors.black)
+      t.term.clear()
+      t.term.setCursorPos(1,1)
+      if t.color then t.term.setTextColor(colors.yellow) end
+      print(" ============================")
+      print("   HARDWARE DE ARTILLERIA   ")
+      print("   DETECTADO                ")
+      print(" ============================")
+      if t.color then t.term.setTextColor(colors.white) end
+      print("")
+      print(" " .. cannon.getHardwareSummary())
+      print("")
+      print(" Activar modulo de artilleria?")
+      print("")
+      if t.color then t.term.setTextColor(colors.cyan) end
+      print("  [1] Si, activar")
+      print("  [2] No por ahora")
+      if t.color then t.term.setTextColor(colors.white) end
+      print("")
+      local choice = tonumber(read())
+      config.set("cannon_asked", true)
+      if choice == 1 then
+        -- Activar widget en menu
+        local widgets = config.get("widgets", {})
+        widgets["cannon"] = true
+        config.set("widgets", widgets)
+        menu.init()
+        -- Configurar teclas si no estan
+        if not config.get("cannon_keys") then
+          cannon.setupKeys(t)
+        end
+      end
+      t.term.setBackgroundColor(colors.black)
+      t.term.clear()
+    elseif not config.get("cannon_keys") then
+      cannon.setupKeys(t)
+      t.term.setBackgroundColor(colors.black)
+      t.term.clear()
+    end
   end
 
   -- Buscar monitor dedicado para artilleria
+  cannon_ui.setMainMonitor(renderer.getMainMonitorName())
   cannon_ui.findDedicatedMonitor(t)
 
   t.term.setBackgroundColor(colors.black)
@@ -633,8 +677,11 @@ function hud.run(renderTarget)
       local entry = detector.onAttach(p1)
       if entry then
         pushNotif("+ " .. entry.label, colors.lime)
-        if entry.osType == "tank" then tanks.init() end
-        if entry.osType == "cannon" or entry.osType:find("^cr_") then
+        if entry.osType == "tank"      then tanks.init()          end
+        if entry.osType == "modem"     then modem_mod.init()      end
+        if entry.osType == "inventory" then inventory.init()      end
+        if entry.osType == "display_target" then display_target.init() end
+        if entry.osType == "cannon" or (entry.osType and entry.osType:find("^cr_")) then
           cannon.init()
           cannon_ui.findDedicatedMonitor(t)
         end
@@ -650,6 +697,13 @@ function hud.run(renderTarget)
         if was.osType == "cannon" or (was.osType and was.osType:find("^cr_")) then
           cannon.init()
         end
+      end
+
+    elseif ev == "rednet_message" then
+      -- p1=senderID, p2=message, p3=protocol
+      if p3 == "velosOS" then
+        modem_mod.onMessage(p1, p2)
+        modem_mod.cleanup()
       end
     end
   end
