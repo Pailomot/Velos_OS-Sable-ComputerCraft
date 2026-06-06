@@ -194,36 +194,36 @@ function modem_mod.renderAll(t, x, y, w, h)
   local line  = y
 
   if not _open then
-    writeLine(t, x, line, "-- RED --", w, col)         line=line+1
-    writeLine(t, x, line, " Modem sin inicializar", w, dim)
+    renderer.writeLine(t, x, line, "-- RED --", w, col)         line=line+1
+    renderer.writeLine(t, x, line, " Modem sin inicializar", w, dim)
     return
   end
 
   -- Vehiculos conocidos en red
-  writeLine(t, x, line, "-- RED VELOSNET --", w, col) line=line+1
+  renderer.writeLine(t, x, line, "-- RED VELOSNET --", w, col) line=line+1
   local vCount = 0
   for _, v in pairs(_knownVehicles) do
     if line - y >= h then break end
-    writeLine(t, x, line,
+    renderer.writeLine(t, x, line,
       string.format(" [V] %s (ID:%d)", v.name, v.id), w, norm)
     line = line + 1; vCount = vCount + 1
   end
   if vCount == 0 then
-    writeLine(t, x, line, " Sin vehiculos en red", w, dim) line=line+1
+    renderer.writeLine(t, x, line, " Sin vehiculos en red", w, dim) line=line+1
   end
 
   if line - y >= h then return end
   line = line + 1
 
   -- Tanks remotos
-  writeLine(t, x, line, "-- TANKS REMOTOS --", w, col) line=line+1
+  renderer.writeLine(t, x, line, "-- TANKS REMOTOS --", w, col) line=line+1
   local now = os.epoch("utc") / 1000
   local tCount = 0
   for sender, entry in pairs(_remoteTanks) do
     if line - y >= h then break end
     local age    = math.floor(now - entry.time)
     local status = age > 5 and " [!]" or ""
-    writeLine(t, x, line,
+    renderer.writeLine(t, x, line,
       string.format(" [T] %s%s", sender, status), w,
       useC and (age > 5 and colors.orange or colors.lime) or nil)
     line = line + 1
@@ -235,7 +235,7 @@ function modem_mod.renderAll(t, x, y, w, h)
         local pctStr = string.format("%3d%%", math.floor((tk.pct or 0) * 100))
         local barW   = w - #pctStr - 3
         local bar    = renderer.progressBar(tk.pct or 0, barW)
-        writeLine(t, x, line,
+        renderer.writeLine(t, x, line,
           "  " .. bar .. " " .. pctStr, w,
           useC and renderer.alertColor(tk.pct or 0, true) or nil)
         line = line + 1
@@ -244,18 +244,18 @@ function modem_mod.renderAll(t, x, y, w, h)
     tCount = tCount + 1
   end
   if tCount == 0 then
-    writeLine(t, x, line, " Sin tanks remotos", w, dim)
+    renderer.writeLine(t, x, line, " Sin tanks remotos", w, dim)
     line = line + 1
   end
 
   -- Alertas recibidas
   if #_alerts > 0 and (line - y) < h then
     line = line + 1
-    writeLine(t, x, line, "-- ALERTAS RED --", w, col) line=line+1
+    renderer.writeLine(t, x, line, "-- ALERTAS RED --", w, col) line=line+1
     for i = #_alerts, math.max(1, #_alerts - 2), -1 do
       if line - y >= h then break end
       local a = _alerts[i]
-      writeLine(t, x, line,
+      renderer.writeLine(t, x, line,
         string.format(" %s: %s", a.sender, a.text), w,
         useC and colors.orange or nil)
       line = line + 1
