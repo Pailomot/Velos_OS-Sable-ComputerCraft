@@ -52,18 +52,9 @@ end
 -- ============================================================
 --  Helpers de escritura (sin parpadeo)
 -- ============================================================
+-- wLine es alias de renderer.writeLine para comodidad
 local function wLine(t, x, y, text, w, fg, bg)
-  local available = w - x + 1
-  if #text > available then
-    text = text:sub(1, available - 1) .. ">"
-  else
-    text = text .. string.rep(" ", available - #text)
-  end
-  if fg then t.term.setTextColor(fg) end
-  if bg then t.term.setBackgroundColor(bg) end
-  t.term.setCursorPos(x, y)
-  t.term.write(text)
-  t.term.setBackgroundColor(colors.black)
+  renderer.writeLine(t, x, y, text, w, fg, bg)
 end
 
 local function hline(t, y, char, fg)
