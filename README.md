@@ -19,7 +19,7 @@ Para instalarlo es en la Advanced Computer
 | **environment** | environmentDetector (Adv. Peripherals) | Implementado (página Entorno) |
 | **cannon** | cbc_cannon_mount (CC:CBC) | Implementado (apuntado, disparo, ensamblado) |
 | **energy** | energy_storage (genérico FE) | Implementado (página Sistemas) |
-| **inventory** | barrel / chest / vault (Minecraft + Create) | 🔲 Detectado, sin módulo |
+| **inventory** | barrel / chest / vault (Minecraft + Create) | Implementado |
 | **speaker** | Speaker (CC:Tweaked) | Implementado (alertas de audio) |
 | **cr_bearing** | create_radar:radar_bearing | Integrado en artillería |
 | **cr_monitor** | create_radar:monitor | Integrado en artillería |
