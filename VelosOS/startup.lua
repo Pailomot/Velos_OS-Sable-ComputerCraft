@@ -1,5 +1,6 @@
 -- ============================================================
 --  VelosOS  |  startup.lua  |  Entry point
+--  Coloca este archivo como /startup.lua en la Advanced Computer
 -- ============================================================
 
 -- Cargar modulos del core
@@ -8,14 +9,17 @@ _G.detector  = require("core.detector")
 _G.config    = require("core.config")
 
 -- Cargar modulos opcionales
-_G.hud         = require("modules.hud")
-_G.tanks       = require("modules.tanks")
-_G.cannon      = require("modules.cannon")
-_G.cannon_ui   = require("modules.cannon_ui")
-_G.speaker     = require("modules.speaker")
-_G.environment = require("modules.environment")
-_G.energy      = require("modules.energy")
-_G.chatbox     = require("modules.chatbox")
+_G.hud            = require("modules.hud")
+_G.tanks          = require("modules.tanks")
+_G.cannon         = require("modules.cannon")
+_G.cannon_ui      = require("modules.cannon_ui")
+_G.speaker        = require("modules.speaker")
+_G.environment    = require("modules.environment")
+_G.energy         = require("modules.energy")
+_G.chatbox        = require("modules.chatbox")
+_G.inventory      = require("modules.inventory")
+_G.modem_mod      = require("modules.modem")
+_G.display_target = require("modules.display_target")
 
 -- Splash screen rapido
 term.setBackgroundColor(colors.black)
