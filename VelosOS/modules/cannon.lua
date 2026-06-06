@@ -213,9 +213,9 @@ function cannon.isAiming()
 end
 
 -- Apuntar a coordenadas absolutas del mundo
--- Compensa la rotacion del vehiculo convirtiendo el vector
--- mundo -> espacio local usando multiplicacion de quaternions
--- Estructura del quaternion de Sable: { a=w, v={x,y,z} }
+-- Compensa la rotacion del vehiculo usando multiplicacion
+-- manual de quaternions (sin depender de quaternion.new)
+-- Estructura de Sable: { a=w, v={x,y,z} }
 function cannon.aimAtCoords(tx, ty, tz)
   local pose = sublevel.getLogicalPose()
   local cx   = pose.position.x
@@ -226,20 +226,23 @@ function cannon.aimAtCoords(tx, ty, tz)
   local dy = ty - cy
   local dz = tz - cz
 
-  local q    = pose.orientation
-  -- Conjugado manual: misma parte vectorial negada, a igual
-  local qInv = quaternion.new(q.a, -q.v.x, -q.v.y, -q.v.z)
+  -- Extraer componentes del quaternion de orientacion
+  local qw = pose.orientation.a
+  local qx = pose.orientation.v.x
+  local qy = pose.orientation.v.y
+  local qz = pose.orientation.v.z
 
-  -- Vector como quaternion puro (a=0)
-  local qv  = quaternion.new(0, dx, dy, dz)
+  -- Rotacion inversa de un vector por un quaternion unitario:
+  -- v' = q* v q  donde q* es el conjugado (negar x,y,z)
+  -- Formula expandida directa (evita crear nuevos quaternions):
+  local t2x = 2.0 * ( qy*dz - qz*dy)
+  local t2y = 2.0 * ( qz*dx - qx*dz)
+  local t2z = 2.0 * ( qx*dy - qy*dx)
 
-  -- Rotacion: qInv * qv * q  (espacio mundo -> espacio local)
-  local res = qInv * qv * q
-
-  -- Extraer componentes del resultado
-  local lx = res.v.x
-  local ly = res.v.y
-  local lz = res.v.z
+  -- Aplicar conjugado: usar -qw para invertir la rotacion
+  local lx = dx + (-qw)*t2x + qy*t2z - qz*t2y
+  local ly = dy + (-qw)*t2y + qz*t2x - qx*t2z
+  local lz = dz + (-qw)*t2z + qx*t2y - qy*t2x
 
   local yaw   = math.deg(math.atan2(-lx, lz))
   local hdist = math.sqrt(lx*lx + lz*lz)
