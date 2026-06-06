@@ -18,12 +18,15 @@ local WIDGET_DEFS = {
   { id = "orientacion", label = "Orientacion",         default = true,  requires = nil         },
   { id = "posicion",    label = "Posicion",            default = true,  requires = nil         },
   { id = "atmosfera",   label = "Atmosfera",           default = true,  requires = nil         },
-  { id = "tanks",       label = "Tanks (combustible)", default = true,  requires = "tank"        },
-  { id = "energia",     label = "Energia (FE)",        default = true,  requires = "energy"      },
-  { id = "radar",       label = "Radar de entidades",  default = false, requires = "radar"       },
-  { id = "entorno",     label = "Clima / Entorno",     default = true,  requires = nil           },
-  { id = "cannon",      label = "Artilleria",          default = false, requires = "cannon"      },
-  { id = "comms",       label = "Comunicaciones",      default = false, requires = "comms"       },
+  { id = "tanks",          label = "Tanks (combustible)", default = true,  requires = "tank"           },
+  { id = "energia",        label = "Energia (FE)",        default = true,  requires = "energy"         },
+  { id = "inventario",     label = "Inventario",          default = true,  requires = "inventory"      },
+  { id = "radar",          label = "Radar de entidades",  default = false, requires = "radar"          },
+  { id = "entorno",        label = "Clima / Entorno",     default = true,  requires = nil              },
+  { id = "cannon",         label = "Artilleria",          default = false, requires = "cannon"         },
+  { id = "comms",          label = "Comunicaciones",      default = false, requires = "comms"          },
+  { id = "red",            label = "Red / Modem",         default = true,  requires = "modem"          },
+  { id = "display_ext",    label = "Display externo",     default = true,  requires = "display_target" },
 }
 
 -- Cache local del estado de widgets
