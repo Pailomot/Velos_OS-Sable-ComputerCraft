@@ -226,7 +226,7 @@ function cannon.aimAtCoords(tx, ty, tz)
 
   -- Rotar al espacio local del vehiculo usando el conjugado del quaternion
   -- (conjugado = inverso para quaternions unitarios)
-  local qInv    = pose.orientation:conjugate()
+  local qInv     = pose.orientation:conjugate()
   local localVec = qInv:rotateVector(worldVec)
 
   -- Calcular yaw y pitch en espacio local
