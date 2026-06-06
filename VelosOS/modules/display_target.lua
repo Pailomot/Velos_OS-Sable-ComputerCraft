@@ -64,7 +64,7 @@ local function renderOne(t, x, y, w, name, entry, maxLines)
   local dim  = useC and colors.lightGray or nil
   local line = y
 
-  writeLine(t, x, line,
+  renderer.writeLine(t, x, line,
     "-- DISPLAY [" .. name .. "] --", w, col)
   line = line + 1
 
@@ -72,12 +72,12 @@ local function renderOne(t, x, y, w, name, entry, maxLines)
   local toShow  = math.min(#lines, maxLines - 1)
 
   for i = 1, toShow do
-    writeLine(t, x, line, " " .. (lines[i] or ""), w, dim)
+    renderer.writeLine(t, x, line, " " .. (lines[i] or ""), w, dim)
     line = line + 1
   end
 
   if #lines > toShow then
-    writeLine(t, x, line,
+    renderer.writeLine(t, x, line,
       " +" .. (#lines - toShow) .. " lineas mas...", w,
       useC and colors.gray or nil)
     line = line + 1
@@ -91,7 +91,7 @@ end
 -- ============================================================
 function display_target.renderAll(t, x, y, w, h)
   if not next(_targets) then
-    writeLine(t, x, y, "Sin display targets", w,
+    renderer.writeLine(t, x, y, "Sin display targets", w,
       t.color and colors.lightGray or nil)
     return
   end
@@ -104,7 +104,7 @@ function display_target.renderAll(t, x, y, w, h)
     if remaining < 3 then break end
 
     if count > 0 then
-      writeLine(t, x, line, string.rep("-", w), w,
+      renderer.writeLine(t, x, line, string.rep("-", w), w,
         t.color and colors.gray or nil)
       line      = line + 1
       remaining = remaining - 1
