@@ -213,8 +213,8 @@ function cannon.isAiming()
 end
 
 -- Apuntar a coordenadas absolutas del mundo
--- Compensa la rotacion actual del vehiculo convirtiendo
--- el vector mundo -> espacio local del sub-level
+-- Compensa la rotacion del vehiculo convirtiendo el vector
+-- mundo -> espacio local usando el quaternion inverso de Sable
 function cannon.aimAtCoords(tx, ty, tz)
   local pose = sublevel.getLogicalPose()
   local cx   = pose.position.x
@@ -222,34 +222,17 @@ function cannon.aimAtCoords(tx, ty, tz)
   local cz   = pose.position.z
 
   -- Vector hacia el objetivo en espacio mundo
-  local dx = tx - cx
-  local dy = ty - cy
-  local dz = tz - cz
+  local worldVec = vector.new(tx - cx, ty - cy, tz - cz)
 
-  -- Rotar el vector por el inverso del quaternion del vehiculo
-  -- para pasarlo al espacio local (relativo al frente del vehiculo)
-  local q  = pose.orientation
-  -- Quaternion inverso = conjugado (qx,qy,qz negados, qw igual)
-  -- porque los quaternions de rotacion pura son unitarios
-  local qw =  q.w
-  local qx = -q.x
-  local qy = -q.y
-  local qz = -q.z
+  -- Rotar al espacio local del vehiculo usando el conjugado del quaternion
+  -- (conjugado = inverso para quaternions unitarios)
+  local qInv    = pose.orientation:conjugate()
+  local localVec = qInv:rotateVector(worldVec)
 
-  -- Rotacion de un vector por un quaternion: v' = q * v * q^-1
-  -- Formula directa para rotar (dx,dy,dz) por (qw,qx,qy,qz):
-  local tx2 = 2.0 * (qy*dz - qz*dy)
-  local ty2 = 2.0 * (qz*dx - qx*dz)
-  local tz2 = 2.0 * (qx*dy - qy*dx)
-
-  local lx = dx + qw*tx2 + qy*tz2 - qz*ty2
-  local ly = dy + qw*ty2 + qz*tx2 - qx*tz2
-  local lz = dz + qw*tz2 + qx*ty2 - qy*tx2
-
-  -- Ahora calcular yaw y pitch en espacio local
-  local yaw   = math.deg(math.atan2(-lx, lz))
-  local hdist = math.sqrt(lx*lx + lz*lz)
-  local pitch = math.deg(math.atan2(ly, hdist))
+  -- Calcular yaw y pitch en espacio local
+  local yaw   = math.deg(math.atan2(-localVec.x, localVec.z))
+  local hdist = math.sqrt(localVec.x*localVec.x + localVec.z*localVec.z)
+  local pitch = math.deg(math.atan2(localVec.y, hdist))
 
   cannon.setYaw(yaw)
   cannon.setPitch(pitch)
