@@ -22,26 +22,60 @@ local TRACK_REFRESH  = 1.0   -- segundos entre lecturas del radar
 --  Monitor dedicado
 -- ============================================================
 
+-- Guarda el nombre de lado/red del monitor principal
+-- para no confundirlo con el secundario
+local _mainMonitorName = nil
+
+function cannon_ui.setMainMonitor(name)
+  _mainMonitorName = name
+end
+
 -- Busca un monitor que no sea el principal del HUD
 function cannon_ui.findDedicatedMonitor(mainRenderTarget)
-  local all = { peripheral.find("monitor") }
-  for _, mon in ipairs(all) do
-    -- Comparar con el monitor principal
-    if mon ~= mainRenderTarget.term then
-      mon.setTextScale(0.5)
-      mon.setBackgroundColor(colors.black)
-      mon.clear()
-      local w, h = mon.getSize()
-      _dedicatedMonitor = {
-        term  = mon,
-        w     = w,
-        h     = h,
-        color = mon.isColour and mon.isColour() or false,
-      }
-      return _dedicatedMonitor
+  _dedicatedMonitor = nil
+
+  local names = peripheral.getNames()
+  for _, name in ipairs(names) do
+    local ptype = peripheral.getType(name)
+    local isMonitor = false
+    if type(ptype) == "table" then
+      for _, t in ipairs(ptype) do
+        if t == "monitor" then isMonitor = true; break end
+      end
+    else
+      isMonitor = (ptype == "monitor")
+    end
+
+    if isMonitor then
+      -- Es monitor secundario si:
+      -- 1. El HUD usa la Advanced Computer (type=="computer") → cualquier monitor es secundario
+      -- 2. El HUD usa un monitor (type=="monitor") → solo los otros son secundarios
+      local isMain = false
+      if mainRenderTarget.type == "monitor" then
+        -- Comparar por nombre de periferico
+        isMain = (name == _mainMonitorName)
+      end
+      -- Si el HUD es computer, ningun monitor es el principal
+
+      if not isMain then
+        local mon = peripheral.wrap(name)
+        if mon then
+          mon.setTextScale(0.5)
+          mon.setBackgroundColor(colors.black)
+          mon.clear()
+          local w, h = mon.getSize()
+          _dedicatedMonitor = {
+            term  = mon,
+            w     = w,
+            h     = h,
+            color = mon.isColour and mon.isColour() or false,
+            name  = name,
+          }
+          return _dedicatedMonitor
+        end
+      end
     end
   end
-  _dedicatedMonitor = nil
   return nil
 end
 
