@@ -4,30 +4,45 @@
 
 local renderer = {}
 
-local _extras = {}
+local _extras          = {}
+local _mainMonitorName = nil   -- nombre del monitor principal (para cannon_ui)
 
 function renderer.init()
   local target = nil
 
-  local mon = peripheral.find("monitor")
-  if mon then
-    mon.setTextScale(0.5)
-    mon.setBackgroundColor(colors.black)
-    mon.clear()
-    local w, h = mon.getSize()
-    target = {
-      term  = mon,
-      w     = w,
-      h     = h,
-      color = mon.isColour and mon.isColour() or false,
-      name  = "Monitor externo (" .. w .. "x" .. h .. ")",
-      type  = "monitor",
-      extras = _extras,
-    }
+  -- Buscar monitor por nombre para poder identificarlo despues
+  local names = peripheral.getNames()
+  for _, name in ipairs(names) do
+    local ptype = peripheral.getType(name)
+    local isMonitor = (ptype == "monitor") or
+      (type(ptype)=="table" and (function()
+        for _, t in ipairs(ptype) do if t=="monitor" then return true end end
+      end)())
+    if isMonitor then
+      local mon = peripheral.wrap(name)
+      if mon then
+        mon.setTextScale(0.5)
+        mon.setBackgroundColor(colors.black)
+        mon.clear()
+        local w, h = mon.getSize()
+        _mainMonitorName = name
+        target = {
+          term  = mon,
+          w     = w,
+          h     = h,
+          color = mon.isColour and mon.isColour() or false,
+          name  = "Monitor externo (" .. w .. "x" .. h .. ")",
+          type  = "monitor",
+          extras = _extras,
+        }
+        break
+      end
+    end
   end
 
   if not target then
     local w, h = term.getSize()
+    _mainMonitorName = nil
     target = {
       term  = term,
       w     = w,
@@ -41,6 +56,10 @@ function renderer.init()
 
   renderer._scanDisplayLinks()
   return target
+end
+
+function renderer.getMainMonitorName()
+  return _mainMonitorName
 end
 
 function renderer._scanDisplayLinks()
