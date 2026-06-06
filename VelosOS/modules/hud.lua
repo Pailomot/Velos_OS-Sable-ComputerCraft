@@ -548,6 +548,10 @@ function hud.run(renderTarget)
 
     cannon.updateAutoAim()
 
+    -- Sincronizar objetivo desde el monitor fisico de Create Radar
+    -- (si el jugador seleccionó algo en el monitor, el OS lo adopta)
+    pcall(function() cannon.syncSelectedFromMonitor() end)
+
     -- Tick de alertas de audio y chat
     pcall(function() speaker.checkAlerts() end)
 
