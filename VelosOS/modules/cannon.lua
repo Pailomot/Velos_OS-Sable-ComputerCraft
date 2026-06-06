@@ -214,25 +214,36 @@ end
 
 -- Apuntar a coordenadas absolutas del mundo
 -- Compensa la rotacion del vehiculo convirtiendo el vector
--- mundo -> espacio local usando el quaternion inverso de Sable
+-- mundo -> espacio local usando multiplicacion de quaternions
+-- Estructura del quaternion de Sable: { a=w, v={x,y,z} }
 function cannon.aimAtCoords(tx, ty, tz)
   local pose = sublevel.getLogicalPose()
   local cx   = pose.position.x
   local cy   = pose.position.y
   local cz   = pose.position.z
 
-  -- Vector hacia el objetivo en espacio mundo
-  local worldVec = vector.new(tx - cx, ty - cy, tz - cz)
+  local dx = tx - cx
+  local dy = ty - cy
+  local dz = tz - cz
 
-  -- Rotar al espacio local del vehiculo usando el conjugado del quaternion
-  -- (conjugado = inverso para quaternions unitarios)
-  local qInv     = pose.orientation:conjugate()
-  local localVec = qInv:rotateVector(worldVec)
+  local q    = pose.orientation
+  -- Conjugado manual: misma parte vectorial negada, a igual
+  local qInv = quaternion.new(q.a, -q.v.x, -q.v.y, -q.v.z)
 
-  -- Calcular yaw y pitch en espacio local
-  local yaw   = math.deg(math.atan2(-localVec.x, localVec.z))
-  local hdist = math.sqrt(localVec.x*localVec.x + localVec.z*localVec.z)
-  local pitch = math.deg(math.atan2(localVec.y, hdist))
+  -- Vector como quaternion puro (a=0)
+  local qv  = quaternion.new(0, dx, dy, dz)
+
+  -- Rotacion: qInv * qv * q  (espacio mundo -> espacio local)
+  local res = qInv * qv * q
+
+  -- Extraer componentes del resultado
+  local lx = res.v.x
+  local ly = res.v.y
+  local lz = res.v.z
+
+  local yaw   = math.deg(math.atan2(-lx, lz))
+  local hdist = math.sqrt(lx*lx + lz*lz)
+  local pitch = math.deg(math.atan2(ly, hdist))
 
   cannon.setYaw(yaw)
   cannon.setPitch(pitch)
