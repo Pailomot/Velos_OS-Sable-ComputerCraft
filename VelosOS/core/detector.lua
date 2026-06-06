@@ -49,7 +49,14 @@ local KNOWN_TYPES = {
   -- Modem
   ["modem"]                = "modem",
   -- Create Scroller
-  ["create_scroller"]      = "scroller",
+  ["create_scroller"]                  = "scroller",
+  -- Create Radar
+  ["create_radar:radar_bearing"]       = "cr_bearing",
+  ["create_radar:monitor"]             = "cr_monitor",
+  ["create_radar:auto_yaw_controller"] = "cr_yaw",
+  ["create_radar:auto_pitch_controller"] = "cr_pitch",
+  ["create_radar:plane_radar"]         = "cr_plane",
+  ["create_radar:fire_controller"]     = "cr_fire",
 }
 
 -- Agrega todos los tipos de fluido y de inventario a KNOWN_TYPES
@@ -165,9 +172,10 @@ function detector.diagnose(renderTarget)
   t.setCursorPos(1,1)
 
   if useC then t.setTextColor(colors.yellow) end
-  print(("= DIAGNOSTICO DE PERIFERICOS ="):sub(1,w))
+  print(("= DIAGNOSTICO PERIFERICOS ="):sub(1,w))
   print(string.rep("-", w))
 
+  -- Listar TODOS los nombres incluyendo red wired
   local names = peripheral.getNames()
   if #names == 0 then
     if useC then t.setTextColor(colors.gray) end
@@ -178,33 +186,34 @@ function detector.diagnose(renderTarget)
     local ptypes = peripheral.getType(name)
     if type(ptypes) == "string" then ptypes = { ptypes } end
 
-    -- Saber si el OS lo reconocio
-    local entry    = _active[name]
-    local osLabel  = entry and ("[" .. entry.osType .. "]") or "[desconocido]"
+    local entry   = _active[name]
+    local osLabel = entry and ("[" .. entry.osType .. "]") or "[desconocido]"
 
     if useC then
       t.setTextColor(entry and colors.lime or colors.orange)
     end
-    print((" %s  %s"):format(name, osLabel):sub(1,w))
+    -- Mostrar nombre completo del periferico
+    print((" " .. name .. "  " .. osLabel):sub(1,w))
 
     if useC then t.setTextColor(colors.lightGray) end
     for _, tp in ipairs(ptypes or {}) do
       print(("   tipo: " .. tp):sub(1,w))
     end
-    print("")
   end
 
   if useC then t.setTextColor(colors.gray) end
   print(string.rep("-", w))
+  -- Mostrar nombre del monitor principal detectado
+  local mainMon = renderer.getMainMonitorName()
+  if mainMon then
+    print((" Monitor principal: " .. mainMon):sub(1,w))
+  end
   print(" Presiona cualquier tecla...")
   t.setTextColor(colors.white)
 
-  -- Ignorar timers y otros eventos hasta recibir una tecla real
   while true do
     local ev = os.pullEvent()
-    if ev == "key" or ev == "mouse_click" or ev == "monitor_touch" then
-      break
-    end
+    if ev == "key" or ev == "mouse_click" or ev == "monitor_touch" then break end
   end
 
   t.setBackgroundColor(colors.black)
