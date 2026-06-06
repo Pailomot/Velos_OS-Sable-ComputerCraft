@@ -278,16 +278,21 @@ end
 -- ============================================================
 
 -- Devuelve lista unificada de tracks de todos los radares
--- Cada track: { x, y, z, label, type, dist, id, velocity }
+-- Deduplicada por ID para evitar que varios radares reporten
+-- la misma entidad varias veces
 function cannon.getTracks()
-  local tracks = {}
-  local pose   = sublevel.getLogicalPose()
+  local byId  = {}   -- { id -> track } para deduplicar
+  local pose  = sublevel.getLogicalPose()
   local ox, oy, oz = pose.position.x, pose.position.y, pose.position.z
 
   local function addTracks(periph)
     local ok, raw = pcall(function() return periph.getTracks() end)
     if not ok or not raw then return end
     for _, t in pairs(raw) do
+      local id = tostring(t.id or "")
+      -- Si ya tenemos este ID, no duplicar
+      if id ~= "" and byId[id] then goto continue end
+
       local px = t.position and t.position.x or 0
       local py = t.position and t.position.y or 0
       local pz = t.position and t.position.z or 0
@@ -296,7 +301,6 @@ function cannon.getTracks()
       local dz = pz - oz
       local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
 
-      -- Etiqueta legible segun entityType
       local eType = t.entityType or "unknown"
       local isMissile = eType:find("radar_projectile") or
                         eType:find("cannon_ball") or
@@ -327,22 +331,27 @@ function cannon.getTracks()
         velocity  = t.velocity,
         category  = t.category,
       }
-      table.insert(tracks, track)
 
-      -- Alerta inmediata si es misil
+      if id ~= "" then byId[id] = track
+      else byId[tostring(#byId + 1)] = track end
+
       if isMissile then
-        pcall(function() speaker.missilWarning()         end)
-        pcall(function() chatbox.missilWarning(dist)     end)
+        pcall(function() speaker.missilWarning()     end)
+        pcall(function() chatbox.missilWarning(dist) end)
       end
+
+      ::continue::
     end
   end
 
-  if _state.crBearing  then addTracks(_state.crBearing)  end
-  if _state.crMonitor  then addTracks(_state.crMonitor)   end
-  if _state.crPlane    then addTracks(_state.crPlane)     end
+  -- Leer tracks de todos los radares disponibles
+  -- (la deduplicacion por ID evita duplicados entre ellos)
+  if _state.crBearing then addTracks(_state.crBearing) end
+  if _state.crMonitor then addTracks(_state.crMonitor) end
+  if _state.crPlane   then addTracks(_state.crPlane)   end
 
-  -- Tambien del playerDetector si no hay radar
-  if #tracks == 0 and _state.playerDet then
+  -- Fallback: playerDetector si no hay ningun radar
+  if not next(byId) and _state.playerDet then
     local ok, players = pcall(function()
       return _state.playerDet.getPlayersInRange(256)
     end)
@@ -355,21 +364,68 @@ function cannon.getTracks()
           local dx = p.x - ox
           local dy = p.y - oy
           local dz = p.z - oz
-          table.insert(tracks, {
-            x     = p.x, y = p.y, z = p.z,
-            label = "Jugador: " .. name,
+          byId[name] = {
+            x=p.x, y=p.y, z=p.z,
+            label   = "Jugador: " .. name,
             rawType = "player",
-            dist  = math.sqrt(dx*dx + dy*dy + dz*dz),
-            id    = name,
-          })
+            dist    = math.sqrt(dx*dx + dy*dy + dz*dz),
+            id      = name,
+          }
         end
       end
     end
   end
 
-  -- Ordenar por distancia
+  -- Convertir a lista y ordenar por distancia
+  local tracks = {}
+  for _, tr in pairs(byId) do table.insert(tracks, tr) end
   table.sort(tracks, function(a, b) return a.dist < b.dist end)
   return tracks
+end
+
+-- Lee el objetivo seleccionado en el monitor fisico de Create Radar
+-- y lo sincroniza como objetivo del OS
+function cannon.syncSelectedFromMonitor()
+  if not _state.crMonitor then return nil end
+
+  -- Intentar getSelectedTrack primero, luego getSelectedTrackId
+  local ok1, selected = pcall(function()
+    return _state.crMonitor.getSelectedTrack()
+  end)
+
+  if ok1 and selected and selected.position then
+    local pose = sublevel.getLogicalPose()
+    local ox, oy, oz = pose.position.x, pose.position.y, pose.position.z
+    local px = selected.position.x
+    local py = selected.position.y
+    local pz = selected.position.z
+    local dx, dy, dz = px-ox, py-oy, pz-oz
+
+    local eType = selected.entityType or "unknown"
+    local label
+    if eType:find("player") then label = "Jugador"
+    elseif eType:find("sable") then label = "Vehiculo"
+    else
+      label = eType:match(":(.+)$") or eType
+      label = label:gsub("_"," ")
+      label = label:sub(1,1):upper()..label:sub(2)
+    end
+
+    local track = {
+      x       = px, y=py, z=pz,
+      label   = label,
+      rawType = eType,
+      dist    = math.sqrt(dx*dx+dy*dy+dz*dz),
+      id      = selected.id,
+      velocity = selected.velocity,
+    }
+    _state.target = track
+    -- Activar modo radar automaticamente
+    _state.aimMode = "radar"
+    return track
+  end
+
+  return nil
 end
 
 -- ============================================================
