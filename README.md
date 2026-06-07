@@ -3,7 +3,7 @@ Un sistema operativo para los vehículos de Sable con ComputerCraft
 
 Para instalarlo es en la Advanced Computer
 
-1. pastebin get https://pastebin.com/3sSu29yc installer
+1. pastebin get https://pastebin.com/ETdrq5Rw installer
 
 2. installer
 
